@@ -1,6 +1,7 @@
 import torch
 import typing
 import math
+import PIL
 
 # mps test
 device = torch.device("mps" if torch.mps.is_available() else "cpu")
@@ -199,7 +200,13 @@ class State:
 
     def __rmul__(self, n:int)->State:
         return self.__mul__(n)
-
+    
+    def __eq__(self, state:State)->bool:
+        cp = torch.equal(self.corner_positions, state.corner_positions)
+        co = torch.allclose(self.corner_orientations, state.corner_orientations)
+        ep = torch.equal(self.edge_positions, state.edge_positions)
+        eo = torch.allclose(self.edge_orientations, state.edge_orientations)
+        return cp and co and ep and eo
 
 
 # test_tensor = torch.tensor(list(range(8)), dtype=torch.uint8)
@@ -251,5 +258,50 @@ print("r' r", -r + r)
 
 print("r2", -2*r)
 print("r2", 2*r)
+print("r2 == -r2", 2*r == -2*r)
 
 # print((r3+r3).corner_positions)
+
+
+# 表示してみる
+# 画像のtensorを作ってPILで表示
+# 画像のサイズ
+size = 512
+# 画像の背景色
+
+black = (0, 0, 0)
+bg_color = black
+
+# h w c
+image = torch.ones((size, size, 3), dtype=torch.uint8)
+image = image * torch.tensor(bg_color, dtype=torch.uint8)
+
+"""
+  Y
+O G R B
+  W
+で並べる
+"""
+
+# 1つのキューブのサイズ
+cube_size = size // 4
+sub_cube_size = cube_size // 3
+
+# 展開図は英語でnet
+# 
+
+def state_to_net(state:State)->torch.Tensor:
+    # f b l r u d
+    # 0 1 2 3 4 5
+    net = torch.zeros((6, 3, 3), dtype=torch.uint8)
+    # 面ごとに向きに対応する数字を入れていく
+    # 真ん中にはそれぞれ面の向き（インデックスと同じ）を入れる
+    net[0, 2, 2] = 0
+    net[1, 2, 2] = 1
+    net[2, 2, 2] = 2
+    net[3, 2, 2] = 3
+    net[4, 2, 2] = 4
+    net[5, 2, 2] = 5
+    
+    # それぞれの面に対して、角と辺の位置を入れていく
+
