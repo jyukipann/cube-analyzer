@@ -277,9 +277,9 @@ image = torch.ones((size, size, 3), dtype=torch.uint8)
 image = image * torch.tensor(bg_color, dtype=torch.uint8)
 
 """
-  Y
-O G R B
   W
+R G O B
+  Y
 で並べる
 """
 
@@ -288,7 +288,6 @@ cube_size = size // 4
 sub_cube_size = cube_size // 3
 
 # 展開図は英語でnet
-# 
 
 def state_to_net(state:State)->torch.Tensor:
     # f b l r u d
@@ -304,4 +303,31 @@ def state_to_net(state:State)->torch.Tensor:
     net[5, 2, 2] = 5
     
     # それぞれの面に対して、角と辺の位置を入れていく
+    # 角と面の向きの関係
+    # 面の番号が少ない方から時計回りが面の番号が入る
+    # その場所にあるサブキューブの向きが入る
+    coner_face = torch.tensor([
+        [1, 4, 2], [1, 3, 4], [0, 4, 3], [0, 2, 4],
+        [1, 2, 5], [1, 5, 3], [0, 3, 5], [0, 5, 2],
+    ], dtype=torch.int64)
+    edge_face = torch.tensor([
+        [1, 2], [1, 3], [0, 3], [0, 2],
+        [1, 4], [3, 4], [0, 4], [2, 4],
+        [1, 5], [3, 5], [0, 5], [2, 5],
+    ], dtype=torch.int64)
+    
+    for i in range(8):
+        # 角の位置
+        cp = state.corner_positions[i].item()
+        # 角の向き
+        co = state.corner_orientations[i]
+        # 角の向きから面の向きを求める
+        # 角の向きはcos, sinなので、arctanで求める
+        angle = math.atan2(co[1].item(), co[0].item())
+        # 角の向きから面の向きを求める
+        face = int(angle / (2/3*pi))
+        # 角の位置から面の位置を求める
+        net[coner_face[i, face], 0, 0] = cp
+        net[coner_face[i, face], 0, 1] = i
+        net[coner_face[i, face], 0, 2] = face
 
