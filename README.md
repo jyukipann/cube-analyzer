@@ -41,6 +41,10 @@ pip install -r requirements.txt
 	- `__sub__`
 	- `__isub__`
 	- `__mul__`
+	
+- [] 状態の比較方法の確立
+	- [ ] `__eq__`でできるようにする
+	- [ ] positionはできるがorientationはfloatなのでできないので解決する
 - [ ] モデルの定義
 - [ ] 学習の実装
 - [ ] 推論の実装
