@@ -397,7 +397,26 @@ def state_to_net(state:State)->torch.Tensor:
         face = int(angle / (2/3*pi))
         # 角の位置から面の位置を求める
         
-        net[coner_faces[target_cp, 0], *FP00] = cp_faces[(0+face)%3]
-        net[coner_faces[target_cp, 1], *FP00] = cp_faces[(1+face)%3]
-        net[coner_faces[target_cp, 2], *FP00] = cp_faces[(2+face)%3]
+        net[
+            coner_faces[target_cp, 0], 
+            *corner_subcube_positons[target_cp, 0]
+        ] = cp_faces[(0+face)%3]
+        net[
+            coner_faces[target_cp, 1], 
+            *corner_subcube_positons[target_cp, 1]
+        ] = cp_faces[(1+face)%3]
+        net[
+            coner_faces[target_cp, 2], 
+            *corner_subcube_positons[target_cp, 2]
+        ] = cp_faces[(2+face)%3]
+        
+    for target_ep in range(12):
+        pass
+        
+    return net
 
+def print_net(net:torch.Tensor):
+    for face in range(6):
+        print(net[face])
+r_net = state_to_net(r)
+print(r_net)
