@@ -280,8 +280,41 @@ image = image * torch.tensor(bg_color, dtype=torch.uint8)
   W
 R G O B
   Y
+
+  U
+L F R B
+  D
+  
+  4
+2 0 1 3
+  5
 で並べる
+
+各面は展開図において上から見て以下のようなナンバリングになる
+[[0,0], [0,1], [0,2],]
+[[1,0], [1,1], [1,2],]
+[[2,0], [2,1], [2,2],]
+
+              +-------------+
+              | C00 E04 C01 |
+              | E07 F04 E05 |
+              | C03 E06 C02 |
++-------------+-------------+-------------+-------------+
+| C00 E07 C03 | C03 E06 C02 | C02 E05 C01 | C01 E04 C00 |
+| E00 F02 E03 | E03 F00 E02 | E02 F01 E01 | E01 F03 E00 |
+| C04 E11 C07 | C07 E10 C06 | C06 E09 C05 | C05 E08 C04 |
++-------------+-------------+-------------+-------------+
+              | C07 E10 C06 |
+              | E11 F05 E09 |
+              | C05 E08 C04 |
+              +-------------+
 """
+C00, C01, C02, C03, C04, C05, C06, C07 = tuple(range(8))
+E00, E01, E02, E03, E04, E05, E06, E07, E08, E09, E10, E11 = tuple(range(12))
+F00, F01, F02, F03, F04, F05 = tuple(range(6))
+FP00, FP01, FP02 =((0,0), (0,1), (0,2))
+FP10, FP11, FP12 =((1,0), (1,1), (1,2))
+FP20, FP21, FP22 =((2,0), (2,1), (2,2))
 
 # 1つのキューブのサイズ
 cube_size = size // 4
@@ -295,30 +328,40 @@ def state_to_net(state:State)->torch.Tensor:
     net = torch.zeros((6, 3, 3), dtype=torch.uint8)
     # 面ごとに向きに対応する数字を入れていく
     # 真ん中にはそれぞれ面の向き（インデックスと同じ）を入れる
-    net[0, 2, 2] = 0
-    net[1, 2, 2] = 1
-    net[2, 2, 2] = 2
-    net[3, 2, 2] = 3
-    net[4, 2, 2] = 4
-    net[5, 2, 2] = 5
+    net[F00, FP11] = 0
+    net[F01, FP11] = 1
+    net[F02, FP11] = 2
+    net[F03, FP11] = 3
+    net[F04, FP11] = 4
+    net[F05, FP11] = 5
     
     # それぞれの面に対して、角と辺の位置を入れていく
     # 角と面の向きの関係
     # 面の番号が少ない方から時計回りが面の番号が入る
     # その場所にあるサブキューブの向きが入る
     coner_face = torch.tensor([
-        [1, 4, 2], [1, 3, 4], [0, 4, 3], [0, 2, 4],
-        [1, 2, 5], [1, 5, 3], [0, 3, 5], [0, 5, 2],
+        [F01, F04, F02], [F01, F03, F04], [F00, F04, F03], [F00, F02, F04],
+        [F01, F02, F05], [F01, F05, F03], [F00, F03, F05], [F00, F05, F02],
+    ], dtype=torch.int64)
+    coner_subcube_positon = torch.tensor([
+        [FP00, FP01, FP02],
+        [FP10, FP11, FP12],
+        [FP20, FP21, FP22],
     ], dtype=torch.int64)
     edge_face = torch.tensor([
-        [1, 2], [1, 3], [0, 3], [0, 2],
-        [1, 4], [3, 4], [0, 4], [2, 4],
-        [1, 5], [3, 5], [0, 5], [2, 5],
+        [F01, F02], [F01, F03], [F00, F03], [F00, F02],
+        [F01, F04], [F03, F04], [F00, F04], [F02, F04],
+        [F01, F05], [F03, F05], [F00, F05], [F02, F05],
     ], dtype=torch.int64)
     
+    # 角の色を入れていく
     for i in range(8):
         # 角の位置
         cp = state.corner_positions[i].item()
+        # cpはiの位置にどの角があるかの番号を示す
+        cp_faces = coner_face[cp]
+        # cp_facesはcpの位置にある角の面の番号（色）が入っている
+        
         # 角の向き
         co = state.corner_orientations[i]
         # 角の向きから面の向きを求める
@@ -327,7 +370,6 @@ def state_to_net(state:State)->torch.Tensor:
         # 角の向きから面の向きを求める
         face = int(angle / (2/3*pi))
         # 角の位置から面の位置を求める
-        net[coner_face[i, face], 0, 0] = cp
-        net[coner_face[i, face], 0, 1] = i
-        net[coner_face[i, face], 0, 2] = face
+        
+        net[coner_face[i, 0], 0, 0] = cp_faces[0]
 
