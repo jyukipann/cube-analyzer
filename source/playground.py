@@ -83,8 +83,15 @@ class State:
         else:
             raise ValueError(
                 "Either all or none of the state components must be provided.")
+    
+    def to(self, t)->State:
+        return State(
+            corner_positions=self.corner_positions.to(t),
+            corner_orientations=self.corner_orientations.to(t),
+            edge_positions=self.edge_positions.to(t),
+            edge_orientations=self.edge_orientations.to(t))
             
-    def clone(self):
+    def clone(self)->State:
         return State(
             corner_positions=self.corner_positions.clone(),
             corner_orientations=self.corner_orientations.clone(),
@@ -309,9 +316,13 @@ L F R B
               | C04 E08 C05 |
               4-------------5
 """
+# 角の位置
 C00, C01, C02, C03, C04, C05, C06, C07 = tuple(range(8))
+# 辺の位置
 E00, E01, E02, E03, E04, E05, E06, E07, E08, E09, E10, E11 = tuple(range(12))
+# 面の位置
 F00, F01, F02, F03, F04, F05 = tuple(range(6))
+# 面内でのサブキューブの位置
 FP00, FP01, FP02 =((0,0), (0,1), (0,2))
 FP10, FP11, FP12 =((1,0), (1,1), (1,2))
 FP20, FP21, FP22 =((2,0), (2,1), (2,2))
@@ -339,31 +350,46 @@ def state_to_net(state:State)->torch.Tensor:
     # 角と面の向きの関係
     # 面の番号が少ない方から時計回りが面の番号が入る
     # その場所にあるサブキューブの向きが入る
-    coner_face = torch.tensor([
-        [F01, F04, F02], [F01, F03, F04], [F00, F04, F03], [F00, F02, F04],
-        [F01, F02, F05], [F01, F05, F03], [F00, F03, F05], [F00, F05, F02],
+    coner_faces = torch.tensor([
+        [F02, F03, F04], # 0 LUB 
+        [F01, F04, F03], # 1 RUB
+        [F00, F04, F01], # 2 FUR
+        [F00, F02, F04], # 3 FLU
+        [F01, F05, F03], # 4 RBD
+        [F01, F03, F05], # 5 RDB
+        [F00, F01, F05], # 6 FRD
+        [F00, F05, F02], # 7 FDL
     ], dtype=torch.int64)
-    coner_subcube_positon = torch.tensor([
-        [FP00, FP01, FP02],
-        [FP10, FP11, FP12],
-        [FP20, FP21, FP22],
+    
+    # F00, F02, F20, F22のどれか
+    # その角を正面から見て面の番号が最小のものから時計まわりに入れていく
+    corner_subcube_positons = torch.tensor([
+        [FP00, FP02, FP00], # 0
+        [FP02, FP02, FP00], # 1
+        [FP02, FP22, FP00], # 2
+        [FP00, FP02, FP20], # 3
+        [FP02, FP02, FP20], # 4
+        [FP22, FP22, FP20], # 5
+        [FP22, FP20, FP02], # 6
+        [FP20, FP22, FP00], # 7
     ], dtype=torch.int64)
-    edge_face = torch.tensor([
+    
+    edge_faces = torch.tensor([
         [F01, F02], [F01, F03], [F00, F03], [F00, F02],
         [F01, F04], [F03, F04], [F00, F04], [F02, F04],
         [F01, F05], [F03, F05], [F00, F05], [F02, F05],
     ], dtype=torch.int64)
     
     # 角の色を入れていく
-    for i in range(8):
+    for target_cp in range(8):
         # 角の位置
-        cp = state.corner_positions[i].item()
+        cp = state.corner_positions[target_cp].item()
         # cpはiの位置にどの角があるかの番号を示す
-        cp_faces = coner_face[cp]
+        cp_faces = coner_faces[cp]
         # cp_facesはcpの位置にある角の面の番号（色）が入っている
         
         # 角の向き
-        co = state.corner_orientations[i]
+        co = state.corner_orientations[target_cp]
         # 角の向きから面の向きを求める
         # 角の向きはcos, sinなので、arctanで求める
         angle = math.atan2(co[1].item(), co[0].item())
@@ -371,5 +397,7 @@ def state_to_net(state:State)->torch.Tensor:
         face = int(angle / (2/3*pi))
         # 角の位置から面の位置を求める
         
-        net[coner_face[i, 0], 0, 0] = cp_faces[0]
+        net[coner_faces[target_cp, 0], *FP00] = cp_faces[(0+face)%3]
+        net[coner_faces[target_cp, 1], *FP00] = cp_faces[(1+face)%3]
+        net[coner_faces[target_cp, 2], *FP00] = cp_faces[(2+face)%3]
 
