@@ -160,10 +160,10 @@ class State:
         
     def __str__(self):
         return (
-            f"corner_positions {self.corner_positions.size()}: {self.corner_positions}\n"
-            f"corner_orientations {self.corner_orientations.size()}: {self.corner_orientations}\n"
-            f"edge_positions {self.edge_positions.size()}: {self.edge_positions}\n"
-            f"edge_orientations {self.edge_orientations.size()}: {self.edge_orientations}\n"
+            f"corner_positions {self.corner_positions.size()}: {self.corner_positions.tolist()}\n"
+            f"corner_orientations {self.corner_orientations.size()}: {self.corner_orientations.tolist()}\n"
+            f"edge_positions {self.edge_positions.size()}: {self.edge_positions.tolist()}\n"
+            f"edge_orientations {self.edge_orientations.size()}: {self.edge_orientations.tolist()}\n"
         )
         
     def __add__(self, state:State)->State:
@@ -253,19 +253,20 @@ r2 = r * 2
 r3 = r * 3
 r4 = r3 + r
 
-print('e', s.corner_positions)
-print('e r', r.corner_positions)
-print('e r r', r2.corner_positions)
-print('e r r r', r3.corner_positions)
-print('e r r r r', r4.corner_positions)
+# print('e', s.corner_positions)
+# print('e r', r.corner_positions)
+# print('e r r', r2.corner_positions)
+# print('e r r r', r3.corner_positions)
+# print('e r r r r', r4.corner_positions)
 
-print("r", r)
-print("r'", -r)
-print("r' r", -r + r)
+print("r")
+print(r)
+# print("r'", -r)
+# print("r' r", -r + r)
 
-print("r2", -2*r)
-print("r2", 2*r)
-print("r2 == -r2", 2*r == -2*r)
+# print("r2", -2*r)
+# print("r2", 2*r)
+# print("r2 == -r2", 2*r == -2*r)
 
 # print((r3+r3).corner_positions)
 
@@ -397,6 +398,7 @@ def state_to_net(state:State)->torch.Tensor:
         face = int(angle / (2/3*pi))
         # 角の位置から面の位置を求める
         
+        # print(cp_faces)
         net[
             coner_faces[target_cp, 0], 
             *corner_subcube_positons[target_cp, 0]
@@ -416,7 +418,24 @@ def state_to_net(state:State)->torch.Tensor:
     return net
 
 def print_net(net:torch.Tensor):
-    for face in range(6):
-        print(net[face])
+    net_for_print = f"""
+        0-------1
+        | {net[F04, *FP00]} {net[F04, *FP01]} {net[F04, *FP02]} |
+        | {net[F04, *FP10]} {net[F04, *FP11]} {net[F04, *FP12]} |
+        | {net[F04, *FP20]} {net[F04, *FP21]} {net[F04, *FP22]} |
+0-------3-------2-------1-------0
+| {net[F02, *FP00]} {net[F02, *FP01]} {net[F02, *FP02]} | {net[F00, *FP00]} {net[F00, *FP01]} {net[F00, *FP02]} | {net[F01, *FP00]} {net[F01, *FP01]} {net[F01, *FP02]} | {net[F03, *FP00]} {net[F03, *FP01]} {net[F03, *FP02]} |
+| {net[F02, *FP10]} {net[F02, *FP11]} {net[F02, *FP12]} | {net[F00, *FP10]} {net[F00, *FP11]} {net[F00, *FP12]} | {net[F01, *FP10]} {net[F01, *FP11]} {net[F01, *FP12]} | {net[F03, *FP10]} {net[F03, *FP11]} {net[F03, *FP12]} |
+| {net[F02, *FP20]} {net[F02, *FP21]} {net[F02, *FP22]} | {net[F00, *FP20]} {net[F00, *FP21]} {net[F00, *FP22]} | {net[F01, *FP20]} {net[F01, *FP21]} {net[F01, *FP22]} | {net[F03, *FP20]} {net[F03, *FP21]} {net[F03, *FP22]} |
+4-------7-------6-------5-------4
+        | {net[F05, *FP00]} {net[F05, *FP01]} {net[F05, *FP02]} |
+        | {net[F05, *FP10]} {net[F05, *FP11]} {net[F05, *FP12]} |
+        | {net[F05, *FP20]} {net[F05, *FP21]} {net[F05, *FP22]} |
+        4-------5
+    """
+    print(net_for_print)
 r_net = state_to_net(r)
-print(r_net)
+s = State()
+print_net(state_to_net(State()))
+print_net(r_net)
+print()
