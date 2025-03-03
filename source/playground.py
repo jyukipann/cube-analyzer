@@ -356,7 +356,7 @@ def state_to_net(state:State)->torch.Tensor:
         [F01, F04, F03], # 1 RUB
         [F00, F04, F01], # 2 FUR
         [F00, F02, F04], # 3 FLU
-        [F01, F05, F03], # 4 RBD
+        [F02, F05, F03], # 4 LBD
         [F01, F03, F05], # 5 RDB
         [F00, F01, F05], # 6 FRD
         [F00, F05, F02], # 7 FDL
@@ -439,3 +439,4 @@ s = State()
 print_net(state_to_net(State()))
 print_net(r_net)
 print()
+print_net(state_to_net(r4))
