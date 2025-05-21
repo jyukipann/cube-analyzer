@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Rubik's Cube Net</title>
+  <style>
+    :root {
+      --size: 40px;           /* 1 ステッカーあたりの一辺 */
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      background: #f5f5f5;
+      font-family: sans-serif;
+    }
+
+    /* ネット全体は 12×9 マスのグリッド (3×4 面 + 2 の余白) */
+    .net {
+      display: grid;
+      grid-template-columns: repeat(12, var(--size));
+      grid-template-rows:    repeat(9,  var(--size));
+      gap: 2px; /* ステッカー間の隙間 */
+    }
+
+    /* ステッカー共通スタイル */
+    .sticker {
+      width:  var(--size);
+      height: var(--size);
+      border: 1px solid #333;   /* 黒い境界線 */
+      box-sizing: border-box;
+    }
+
+    /* 面ごとの色 */
+    .U { background: #ffffff; }
+    .F { background: #388e3c; }
+    .R { background: #d32f2f; }
+    .B { background: #1976d2; }
+    .L { background: #ff6f00; }
+    .D { background: #fdd835; }
+  </style>
+</head>
+<body>
+  <!-- ルービックキューブ展開図 -->
+  <div class="net" id="net"></div>
+
+  <script>
+    /*
+      面配置 (T 形)：
+            U
+      L  F  R  B
+            D
+    */
+
+    const net = document.getElementById('net');
+
+    /** 各面の左上基準位置 (1-indexed) */
+    const faces = {
+      U: { row: 1, col: 4 },   // 上面
+      L: { row: 4, col: 1 },   // 左面
+      F: { row: 4, col: 4 },   // 前面
+      R: { row: 4, col: 7 },   // 右面
+      B: { row: 4, col: 10 },  // 背面
+      D: { row: 7, col: 4 }    // 底面
+    };
+
+    // 6 面 × 3×3 = 54 個のステッカーを生成
+    for (const [face, pos] of Object.entries(faces)) {
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+          const div = document.createElement('div');
+          div.className = `sticker ${face}`;
+          // CSS Grid 上の位置指定 (1-indexed)
+          div.style.gridRowStart    = pos.row + r;
+          div.style.gridColumnStart = pos.col + c;
+          net.appendChild(div);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
