@@ -87,23 +87,26 @@ def state_to_net(state: State)->torch.Tensor:
     slicer_cp = state.corner_positions.to(torch.int64)
     corner_faces = CORNER_FACES[slicer_cp]
     corner_twists = state.twist_co
-    corner_subcube_positions = CORNER_SUBCUBES[slicer_cp]
-    print(corner_twists)
-    print(corner_faces)
-    # print(corner_subcube_positions)
+    corner_subcube_positions = CORNER_SUBCUBES
+    # corner_subcube_positions = CORNER_SUBCUBES[slicer_cp]
     
     # corner_facesをtwist分だけ回転させる
-    corner_twists = corner_twists.unsqueeze(1).view(-1, 1).to(torch.int64)
-    corner_faces_twisted = torch.empty_like(corner_faces)
-    print(corner_faces_twisted[:, 0])
-    print(corner_faces[:, (0+corner_twists[:, 0]) % 3])
-    print(corner_twists)
-    corner_faces_twisted[:, 0] = corner_faces[:, (0+corner_twists[:, 0]) % 3]
-    corner_faces_twisted[:, 1] = corner_faces[:, (1+corner_twists[:, 0]) % 3]
-    corner_faces_twisted[:, 2] = corner_faces[:, (2+corner_twists[:, 0]) % 3]
-    print(corner_faces_twisted)
+    corner_twists = corner_twists.unsqueeze(1).view(-1, 1).to(torch.int64) 
+    corner_faces_rotated = torch.empty_like(corner_faces)
+    for i in range(8):
+        corner_faces_rotated[i] = torch.roll(corner_faces[i], -corner_twists[i].item())
+        net[CORNER_FACES[i, 0], *corner_subcube_positions[i, 0]] = corner_faces_rotated[i][0]
+        net[CORNER_FACES[i, 1], *corner_subcube_positions[i, 1]] = corner_faces_rotated[i][1]
+        net[CORNER_FACES[i, 2], *corner_subcube_positions[i, 2]] = corner_faces_rotated[i][2]
+        
+        print(f"CORNER_FACES[{i}]: {CORNER_FACES[i]}")
+        print(f"corner_subcube_positions[{i}]: {corner_subcube_positions[i]}")
+        print(f"corner_faces_rotated[{i}]: {corner_faces_rotated[i]}")
+
+    print_net(net)
+
     return net
-    
+
 def print_net(net:torch.Tensor):
     net_for_print = f"""
         0-------1
