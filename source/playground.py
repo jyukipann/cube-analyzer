@@ -413,7 +413,15 @@ def state_to_net(state:State)->torch.Tensor:
         ] = cp_faces[(2+face)%3]
         
     for target_ep in range(12):
-        pass
+        ep = state.edge_positions[target_ep].item()
+        
+        ep_faces = edge_faces[ep]
+        
+        eo = state.edge_orientations[target_ep]
+        
+        angle = math.atan2(eo[1].item(), eo[0])
+        
+        
         
     return net
 
@@ -439,4 +447,4 @@ s = State()
 print_net(state_to_net(State()))
 print_net(r_net)
 print()
-print_net(state_to_net(r4))
+# print_net(state_to_net(r4))
