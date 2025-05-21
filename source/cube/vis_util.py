@@ -65,14 +65,14 @@ CORNER_FACES = torch.tensor([
 # F00, F02, F20, F22のどれか
 # その角を正面から見て面の番号が最小のものから時計まわりに入れていく
 CORNER_SUBCUBES = torch.tensor([
-    [FP00, FP02, FP00], # 0
+    [FP00, FP00, FP02], # 0
     [FP02, FP02, FP00], # 1
     [FP02, FP22, FP00], # 2
     [FP00, FP02, FP20], # 3
-    [FP02, FP02, FP20], # 4
+    [FP20, FP22, FP20], # 4
     [FP22, FP22, FP20], # 5
     [FP22, FP20, FP02], # 6
-    [FP20, FP22, FP00], # 7
+    [FP20, FP00, FP22], # 7
 ], dtype=torch.int64)
 
 def state_to_net(state: State)->torch.Tensor:
