@@ -19,6 +19,15 @@ def inverse_orientation(o:torch.Tensor)->torch.Tensor:
     o[:,1] = -o[:,1]
     return o
 
+def inverse_orientation_int(o:torch.Tensor)->torch.Tensor:
+    return -o.clone()
+
+TWIST_TABLE = torch.tensor([
+    [math.cos(0), math.sin(0)],   # 0
+    [math.cos(2/3*math.pi), math.sin(2/3*math.pi)],   # 1
+    [math.cos(4/3*math.pi), math.sin(4/3*math.pi)],   # 2
+], dtype=torch.float16)
+
 State = typing.NamedTuple(
     "State", [
         ("corner_positions", torch.Tensor), 
@@ -52,7 +61,7 @@ class State:
             corner_positions (torch.Tensor, optional): [8 corners]. Defaults to None.
             corner_orientations (torch.Tensor, optional): [2dims for 3 orientations [cos, sin] * 8]. Defaults to None.
             edge_positions (torch.Tensor, optional): [12 edges]. Defaults to None.
-            edge_orientations (torch.Tensor, optional): [2dims for 2 orientations [cos, sin] * 12]. Defaults to None.
+            edge_orientations (torch.Tensor, optional): [(+/-)1 for 2 orientations -1/+1 * 12]. Defaults to None.
         """
         
         none_all = (
@@ -74,7 +83,7 @@ class State:
             self.edge_positions = torch.tensor(
                 list(range(12)), dtype=torch.uint8)
             self.edge_orientations = torch.tensor(
-                [[1,0]] * 12, dtype=torch.float16)
+                [1] * 12, dtype=torch.int8)
         elif not_none_all:
             self.corner_positions = corner_positions
             self.corner_orientations = corner_orientations
@@ -98,7 +107,7 @@ class State:
             edge_positions=self.edge_positions.clone(),
             edge_orientations=self.edge_orientations.clone())
         
-    def _half_apply(self,
+    def _corner_apply(self,
                     p:torch.Tensor, o:torch.Tensor,
                     sp:torch.Tensor, so:torch.Tensor)->tuple[torch.Tensor]:
         """_summary_
@@ -108,18 +117,31 @@ class State:
         p = p[sp.to(torch.int64)].clone()
         so = so[sp.to(torch.int64)].clone()
         o = torch.stack([
-            # cos(a+b) = cos(a)cos(b) - sin(a)sin(b)
-            o[:,0] * so[:,0] - o[:,1] * so[:,1],
-            # sin(a+b) = sin(a)cos(b) + cos(a)sin(b)
-            o[:,1] * so[:,0] + o[:,0] * so[:,1],
-        ], dim=1).clone()
+            # cos(a-b) = cos(a)cos(b) + sin(a)sin(b)
+            o[:,0] * so[:,0] + o[:,1] * so[:,1],
+            # sin(a-b) = sin(a)cos(b) - cos(a)sin(b)
+            o[:,1] * so[:,0] - o[:,0] * so[:,1],
+        ], dim=1)
         return (p, o)
     
+    def _edge_apply(self,
+                    p:torch.Tensor, o:torch.Tensor,
+                    sp:torch.Tensor, so:torch.Tensor)->tuple[torch.Tensor]:
+        """_summary_
+        immutable
+        """
+        
+        p = p[sp.to(torch.int64)].clone()
+        so = so[sp.to(torch.int64)].clone()
+        o = o*so
+        return (p, o)
+    
+    
     def _apply(self, state:State)->tuple[torch.Tensor]:
-        cp, co = self._half_apply(
+        cp, co = self._corner_apply(
             self.corner_positions, self.corner_orientations,
             state.corner_positions, state.corner_orientations)
-        ep, eo = self._half_apply(
+        ep, eo = self._edge_apply(
             self.edge_positions, self.edge_orientations,
             state.edge_positions, state.edge_orientations)
         return (cp, co, ep, eo)
@@ -161,9 +183,9 @@ class State:
     def __str__(self):
         return (
             f"corner_positions {self.corner_positions.size()}: {self.corner_positions.tolist()}\n"
-            f"corner_orientations {self.corner_orientations.size()}: {self.corner_orientations.tolist()}\n"
+            f"corner_orientations {self.corner_orientations.size()}: {self.twist_co.tolist()}\n"
             f"edge_positions {self.edge_positions.size()}: {self.edge_positions.tolist()}\n"
-            f"edge_orientations {self.edge_orientations.size()}: {self.edge_orientations.tolist()}\n"
+            f"edge_orientations {self.edge_orientations.size()}: {self.twist_eo.tolist()}\n"
         )
         
     def __add__(self, state:State)->State:
@@ -185,7 +207,7 @@ class State:
         iep = inverse_permutation(self.edge_positions)
         
         ico = inverse_orientation(self.corner_orientations)[icp.to(torch.int64)]
-        ieo = inverse_orientation(self.edge_orientations)[iep.to(torch.int64)]
+        ieo = inverse_orientation_int(self.edge_orientations)[iep.to(torch.int64)]
         
         return State(
             corner_positions=icp,
@@ -212,8 +234,23 @@ class State:
         cp = torch.equal(self.corner_positions, state.corner_positions)
         co = torch.allclose(self.corner_orientations, state.corner_orientations)
         ep = torch.equal(self.edge_positions, state.edge_positions)
-        eo = torch.allclose(self.edge_orientations, state.edge_orientations)
+        eo = torch.equal(self.edge_orientations, state.edge_orientations)
         return cp and co and ep and eo
+    
+    @property
+    def twist_eo(self)->torch.Tensor:
+        return ((self.edge_orientations.clone() - 1)/-2).to(torch.uint8)
+    
+    @property
+    def twist_co(self)->torch.Tensor:
+        co = (
+            self.corner_orientations 
+            / 
+            torch.linalg.norm(self.corner_orientations)
+        )
+
+        idx = torch.argmax(co @ TWIST_TABLE.T, dim=1).to(torch.uint8)
+        return idx
 
 
 # test_tensor = torch.tensor(list(range(8)), dtype=torch.uint8)
@@ -228,27 +265,30 @@ class State:
 # [0, 1, 2, 0, 0, 2, 1, 0],
 # [0, 5, 9, 3, 4, 2, 6, 7, 8, 1, 10, 11],
 # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-
-# 回転 120度 2/3π
-pi = math.pi
-rot0 = [math.cos(0), math.sin(0)]
-rot1 = [math.cos(2/3*pi), math.sin(2/3*pi)]
-rot2 = [math.cos(4/3*pi), math.sin(4/3*pi)]
-
+TT = TWIST_TABLE.tolist()
 r = State(
     corner_positions=torch.tensor(
         [0, 2, 6, 3, 4, 1, 5, 7], dtype=torch.uint8),
     corner_orientations=torch.tensor(
-        [rot0, rot1, rot2, rot0, rot0, rot2, rot1, rot0], dtype=torch.float16),
+        [TT[0], TT[1], TT[2], TT[0], TT[0], TT[2], TT[1], TT[0]], dtype=torch.float16),
     edge_positions=torch.tensor(
         [0, 5, 9, 3, 4, 2, 6, 7, 8, 1, 10, 11], dtype=torch.uint8),
     edge_orientations=torch.tensor(
-        [rot0] * 12, dtype=torch.float16),
+        [1] * 12, dtype=torch.int8),
 )
+
+print(r)
+print(r.twist_eo, r.twist_co)
 
 s = State()
 # print(s)
-r = s.get_applied(r)
+r_state = s.get_applied(r)
+
+print(r == r_state)
+
+print(r)
+print(r_state)
+
 r2 = r * 2
 r3 = r * 3
 r4 = r3 + r
@@ -259,8 +299,7 @@ r4 = r3 + r
 # print('e r r r', r3.corner_positions)
 # print('e r r r r', r4.corner_positions)
 
-print("r")
-print(r)
+
 # print("r'", -r)
 # print("r' r", -r + r)
 
@@ -395,7 +434,7 @@ def state_to_net(state:State)->torch.Tensor:
         # 角の向きはcos, sinなので、arctanで求める
         angle = math.atan2(co[1].item(), co[0].item())
         # 角の向きから面の向きを求める
-        face = int(angle / (2/3*pi))
+        face = int(angle / (2/3*math.pi))
         # 角の位置から面の位置を求める
         
         # print(cp_faces)
@@ -419,7 +458,7 @@ def state_to_net(state:State)->torch.Tensor:
         
         eo = state.edge_orientations[target_ep]
         
-        angle = math.atan2(eo[1].item(), eo[0])
+        angle = (eo - 1)/-2
         
         
         
@@ -442,9 +481,9 @@ def print_net(net:torch.Tensor):
         4-------5
     """
     print(net_for_print)
-r_net = state_to_net(r)
-s = State()
-print_net(state_to_net(State()))
-print_net(r_net)
-print()
-# print_net(state_to_net(r4))
+# r_net = state_to_net(r)
+# s = State()
+# print_net(state_to_net(State()))
+# print_net(r_net)
+# print()
+# # print_net(state_to_net(r4))
