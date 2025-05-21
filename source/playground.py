@@ -167,23 +167,6 @@ def state_to_net(state:State)->torch.Tensor:
         
     return net
 
-def print_net(net:torch.Tensor):
-    net_for_print = f"""
-        0-------1
-        | {net[F04, *FP00]} {net[F04, *FP01]} {net[F04, *FP02]} |
-        | {net[F04, *FP10]} {net[F04, *FP11]} {net[F04, *FP12]} |
-        | {net[F04, *FP20]} {net[F04, *FP21]} {net[F04, *FP22]} |
-0-------3-------2-------1-------0
-| {net[F02, *FP00]} {net[F02, *FP01]} {net[F02, *FP02]} | {net[F00, *FP00]} {net[F00, *FP01]} {net[F00, *FP02]} | {net[F01, *FP00]} {net[F01, *FP01]} {net[F01, *FP02]} | {net[F03, *FP00]} {net[F03, *FP01]} {net[F03, *FP02]} |
-| {net[F02, *FP10]} {net[F02, *FP11]} {net[F02, *FP12]} | {net[F00, *FP10]} {net[F00, *FP11]} {net[F00, *FP12]} | {net[F01, *FP10]} {net[F01, *FP11]} {net[F01, *FP12]} | {net[F03, *FP10]} {net[F03, *FP11]} {net[F03, *FP12]} |
-| {net[F02, *FP20]} {net[F02, *FP21]} {net[F02, *FP22]} | {net[F00, *FP20]} {net[F00, *FP21]} {net[F00, *FP22]} | {net[F01, *FP20]} {net[F01, *FP21]} {net[F01, *FP22]} | {net[F03, *FP20]} {net[F03, *FP21]} {net[F03, *FP22]} |
-4-------7-------6-------5-------4
-        | {net[F05, *FP00]} {net[F05, *FP01]} {net[F05, *FP02]} |
-        | {net[F05, *FP10]} {net[F05, *FP11]} {net[F05, *FP12]} |
-        | {net[F05, *FP20]} {net[F05, *FP21]} {net[F05, *FP22]} |
-        4-------5
-    """
-    print(net_for_print)
 # r_net = state_to_net(r)
 # s = State()
 # print_net(state_to_net(State()))
