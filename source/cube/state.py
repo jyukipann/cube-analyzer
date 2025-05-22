@@ -165,7 +165,7 @@ class State:
         immutable
         """
         p = self.edge_positions[sp.to(torch.int64)].clone()
-        so = so[sp.to(torch.int64)].clone()
+        # so = so[sp.to(torch.int64)].clone()
         o = self.edge_orientations
         o = o*so
         return (p, o)
@@ -336,7 +336,10 @@ if __name__ == "__main__":
     # print(s+s)
     # print(s + MOVES['R'] == MOVES['R'])
     # print(s + MOVES['R'])
-    print(MOVES['R']+MOVES['R'])
+    # print(MOVES['R']+MOVES['R'])
+    print(s - MOVES['R'])
+    print(3*MOVES['R'])
+    print(MOVES['R']-MOVES['R'])
     # print(MOVES['R'] + MOVES['R'])
     # print(MOVES['R'] + MOVES['R'] + MOVES['R'] + MOVES['R'])
     # print(4 * MOVES['R'])
