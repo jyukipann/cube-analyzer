@@ -28,6 +28,21 @@ TWIST_TABLE = torch.tensor([
     [math.cos(4/3*pi), math.sin(4/3*pi)],   # 2
 ], dtype=torch.float16)
 
+def get_twist_vec(twist:int, to_list=True)->torch.Tensor:
+    """_summary_
+
+    Args:
+        twist (int): twist index
+
+    Returns:
+        torch.Tensor: twist vector
+    """
+    twist = twist % 3
+    ret = TWIST_TABLE[twist].clone()
+    if to_list:
+        ret = ret.tolist()
+    return ret
+
 State = typing.NamedTuple(
     "State", [
         ("corner_positions", torch.Tensor), 
