@@ -171,22 +171,32 @@ def print_net(net:torch.Tensor):
     print(net_for_print.replace("9", " "))
 
 if __name__ == "__main__":
-    from state import get_twist_vec
-    TT = lambda n: get_twist_vec(n, to_list=True)
-    r = State(
-        corner_positions=torch.tensor(
-            [0, 2, 6, 3, 4, 1, 5, 7], dtype=torch.int8),
-        corner_orientations=torch.tensor(
-            # [TT(t)for t in [0, 1, 2, 0, 0, 2, 1, 0]], 
-            [TT(t) for t in [0, 1, 0, 0, 0, 0, 0, 0]], 
-            dtype=torch.float16),
-        edge_positions=torch.tensor(
-            [0, 5, 9, 3, 4, 2, 6, 7, 8, 1, 10, 11], dtype=torch.int8),
-        edge_orientations=torch.tensor(
-            [1] * 12, dtype=torch.int8),
-    )
+    moves = {
+        'U': State([3, 0, 1, 2, 4, 5, 6, 7],
+                [0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 2, 3, 7, 4, 5, 6, 8, 9, 10, 11],
+                [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ]),
+        'D': State([0, 1, 2, 3, 5, 6, 7, 4],
+                [0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 8],
+                [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ]),
+        'L': State([4, 1, 2, 0, 7, 5, 6, 3],
+                [2, 0, 0, 1, 1, 0, 0, 2],
+                [11, 1, 2, 7, 4, 5, 6, 0, 8, 9, 10, 3],
+                [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ]),
+        'R': State([0, 2, 6, 3, 4, 1, 5, 7],
+                [0, 1, 2, 0, 0, 2, 1, 0],
+                [0, 5, 9, 3, 4, 2, 6, 7, 8, 1, 10, 11],
+                [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ]),
+        'F': State([0, 1, 3, 7, 4, 5, 2, 6],
+                [0, 0, 1, 2, 0, 0, 2, 1],
+                [0, 1, 6, 10, 4, 5, 3, 7, 8, 9, 2, 11],
+                [-1, -1, 1, 1, -1, -1, 1, -1, -1, -1, 1, -1]),
+        'B': State([1, 5, 2, 3, 0, 4, 6, 7],
+                [1, 2, 0, 0, 2, 1, 0, 0],
+                [4, 8, 2, 3, 1, 5, 6, 7, 0, 9, 10, 11],
+                [1, 1, -1, -1, 1, -1, -1, -1, 1, -1, -1, -1]),
+    }
     
     state_to_net(State())
-    state_to_net(r)
-    state_to_net(r-r)
-    
+    state_to_net(moves['R'])
