@@ -149,13 +149,13 @@ class State:
         """
         
         p = self.corner_positions[sp.to(torch.int64)].clone()
-        so = so[sp.to(torch.int64)].clone()
+        # so = so[sp.to(torch.int64)].clone()
         o = self.corner_orientations
         o = torch.stack([
             # cos(a+b) = cos(a)cos(b) + sin(a)sin(b)
-            o[:,0] * so[:,0] - o[:,1] * so[:,1],
+            o[:,0] * so[:,0] + o[:,1] * so[:,1],
             # sin(a+b) = sin(a)cos(b) - cos(a)sin(b)
-            o[:,1] * so[:,0] + o[:,0] * so[:,1],
+            o[:,1] * so[:,0] - o[:,0] * so[:,1],
         ], dim=1)
         return (p, o)
     
@@ -334,9 +334,9 @@ if __name__ == "__main__":
     s = State()
     # print(s)
     # print(s+s)
-    print(s + MOVES['R'] == MOVES['R'])
-    print(s + MOVES['R'])
-    print(MOVES['R'])
+    # print(s + MOVES['R'] == MOVES['R'])
+    # print(s + MOVES['R'])
+    print(MOVES['R']+MOVES['R'])
     # print(MOVES['R'] + MOVES['R'])
     # print(MOVES['R'] + MOVES['R'] + MOVES['R'] + MOVES['R'])
     # print(4 * MOVES['R'])
