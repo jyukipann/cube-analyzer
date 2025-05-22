@@ -256,9 +256,13 @@ class State:
         
         s = self.clone()
         move = self.clone()
+        if n == -1:
+            return -move
+        if n == 1:
+            return s
         if n < 0:
             move = -move
-        for _ in range(abs(n)):
+        for _ in range(abs(n-1)):
             s = s + move
         return s
 
@@ -267,7 +271,7 @@ class State:
     
     def __eq__(self, state:State)->bool:
         cp = torch.equal(self.corner_positions, state.corner_positions)
-        co = torch.allclose(self.corner_orientations, state.corner_orientations)
+        co = torch.equal(self.twist_co, state.twist_co)
         ep = torch.equal(self.edge_positions, state.edge_positions)
         eo = torch.equal(self.edge_orientations, state.edge_orientations)
         return cp and co and ep and eo
