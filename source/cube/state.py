@@ -149,8 +149,8 @@ class State:
         """
         
         p = self.corner_positions[sp.to(torch.int64)].clone()
-        o = self.corner_orientations
         so = so[sp.to(torch.int64)].clone()
+        o = self.corner_orientations
         o = torch.stack([
             # cos(a+b) = cos(a)cos(b) + sin(a)sin(b)
             o[:,0] * so[:,0] - o[:,1] * so[:,1],
