@@ -20,7 +20,7 @@ def inverse_orientation(o:torch.Tensor)->torch.Tensor:
     return o
 
 def inverse_orientation_int(o:torch.Tensor)->torch.Tensor:
-    return -o.clone()
+    return o.clone()
 
 TWIST_TABLE = torch.tensor([
     [math.cos(0), math.sin(0)],   # 0
