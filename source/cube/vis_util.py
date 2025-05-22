@@ -44,9 +44,9 @@ F, R, L, B, U, D = F00, F01, F02, F03, F04, F05
 ITOA = {0:'F', 1:'R', 2:'L', 3:'B', 4:'U', 5:'D'}
 
 # 面内でのサブキューブの位置
-FP00, FP01, FP02 =((0,0), (0,1), (0,2))
-FP10, FP11, FP12 =((1,0), (1,1), (1,2))
-FP20, FP21, FP22 =((2,0), (2,1), (2,2))
+FP00, FP01, FP02 = ((0,0), (0,1), (0,2))
+FP10, FP11, FP12 = ((1,0), (1,1), (1,2))
+FP20, FP21, FP22 = ((2,0), (2,1), (2,2))
 
 # それぞれの面に対して、角と辺の位置を入れていく
 # 角と面の向きの関係
@@ -76,33 +76,74 @@ CORNER_SUBCUBES = torch.tensor([
     [FP20, FP00, FP22], # 7
 ], dtype=torch.int64)
 
+EDGE_FACES = torch.tensor([
+    [L,B], # E00
+    [R,B], # E01
+    [F,R], # E02
+    [F,L], # E03
+    [B,U], # E04
+    [R,U], # E05
+    [F,U], # E06
+    [L,U], # E07
+    [B,D], # E08
+    [R,D], # E09
+    [F,D], # E10
+    [L,D], # E11
+], dtype=torch.int64)
+
+EDGE_SUBCUBES = torch.tensor([
+    [FP10, FP12], # E00
+    [FP12, FP10], # E01
+    [FP12, FP10], # E02
+    [FP10, FP12], # E03
+    [FP01, FP01], # E04
+    [FP01, FP12], # E05
+    [FP01, FP21], # E06
+    [FP01, FP10], # E07
+    [FP21, FP21], # E08
+    [FP21, FP12], # E09
+    [FP21, FP01], # E10
+    [FP21, FP10], # E11
+], dtype=torch.int64)
+
+
 def state_to_net(state: State)->torch.Tensor:
     net = torch.zeros((6, 3, 3), dtype=torch.int8)+9
     
+    # center
     (
         net[F00, *FP11], net[F01, *FP11], net[F02, *FP11],
         net[F03, *FP11], net[F04, *FP11], net[F05, *FP11],
     ) = tuple(range(6))
     
+    # conner
     slicer_cp = state.corner_positions.to(torch.int64)
     corner_faces = CORNER_FACES[slicer_cp]
     corner_twists = state.twist_co
     corner_subcube_positions = CORNER_SUBCUBES
-    # corner_subcube_positions = CORNER_SUBCUBES[slicer_cp]
-    
-    # corner_facesをtwist分だけ回転させる
+    ## corner_facesをtwist分だけ回転させる
     corner_twists = corner_twists.unsqueeze(1).view(-1, 1).to(torch.int64) 
     corner_faces_rotated = torch.empty_like(corner_faces)
     for i in range(8):
+        # subcube回転
         corner_faces_rotated[i] = torch.roll(corner_faces[i], -corner_twists[i].item())
+        # subcubeの位置に値を入れる
         net[CORNER_FACES[i, 0], *corner_subcube_positions[i, 0]] = corner_faces_rotated[i][0]
         net[CORNER_FACES[i, 1], *corner_subcube_positions[i, 1]] = corner_faces_rotated[i][1]
         net[CORNER_FACES[i, 2], *corner_subcube_positions[i, 2]] = corner_faces_rotated[i][2]
-        
-        print(f"CORNER_FACES[{i}]: {CORNER_FACES[i]}")
-        print(f"corner_subcube_positions[{i}]: {corner_subcube_positions[i]}")
-        print(f"corner_faces_rotated[{i}]: {corner_faces_rotated[i]}")
 
+    # edge
+    slicer_ep = state.edge_positions.to(torch.int64)
+    edge_faces = EDGE_FACES[slicer_ep]
+    edge_twists = state.twist_eo
+    edge_subcube_positions = EDGE_SUBCUBES
+    for i in range(12):
+        # subcubeフリップ
+        is_flipped = edge_twists[i]
+        # subcubeの位置に値を入れる
+        net[EDGE_FACES[i, 0], *edge_subcube_positions[i, 0]] = edge_faces[i][is_flipped]
+        net[EDGE_FACES[i, 1], *edge_subcube_positions[i, 1]] = edge_faces[i][(is_flipped+1)%2]
+    
     print_net(net)
 
     return net
