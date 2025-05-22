@@ -177,7 +177,9 @@ if __name__ == "__main__":
         corner_positions=torch.tensor(
             [0, 2, 6, 3, 4, 1, 5, 7], dtype=torch.int8),
         corner_orientations=torch.tensor(
-            [TT(0), TT(1), TT(2), TT(0), TT(0), TT(2), TT(1), TT(0)], dtype=torch.float16),
+            # [TT(t)for t in [0, 1, 2, 0, 0, 2, 1, 0]], 
+            [TT(t) for t in [0, 1, 0, 0, 0, 0, 0, 0]], 
+            dtype=torch.float16),
         edge_positions=torch.tensor(
             [0, 5, 9, 3, 4, 2, 6, 7, 8, 1, 10, 11], dtype=torch.int8),
         edge_orientations=torch.tensor(
