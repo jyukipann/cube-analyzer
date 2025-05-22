@@ -45,10 +45,10 @@ def get_twist_vec(twist:int, to_list=True)->torch.Tensor:
 
 State = typing.NamedTuple(
     "State", [
-        ("corner_positions", torch.Tensor), 
-        ("corner_orientations", torch.Tensor), 
-        ("edge_positions", torch.Tensor), 
-        ("edge_orientations", torch.Tensor)
+        ("corner_positions", torch.Tensor|list[int]), 
+        ("corner_orientations", torch.Tensor|list[list[float]]|list[int]), 
+        ("edge_positions", torch.Tensor|list[int]), 
+        ("edge_orientations", torch.Tensor|list[int]),
     ]
 )
 
@@ -66,10 +66,10 @@ class State:
     """
     def __init__(
             self,
-            corner_positions:torch.Tensor=None,
-            corner_orientations:torch.Tensor=None,
-            edge_positions:torch.Tensor=None,
-            edge_orientations:torch.Tensor=None):
+            corner_positions:torch.Tensor|list[int]=None,
+            corner_orientations:torch.Tensor|list[list[float]]|list[int]=None,
+            edge_positions:torch.Tensor|list[int]=None,
+            edge_orientations:torch.Tensor|list[list[float]]|list[int]=None):
         """_summary_
         
         Args:
@@ -100,6 +100,27 @@ class State:
             self.edge_orientations = torch.tensor(
                 [1] * 12, dtype=torch.int8)
         elif not_none_all:
+            if isinstance(corner_positions, list):
+                corner_positions = torch.tensor(
+                    corner_positions, dtype=torch.int8)
+            if isinstance(corner_orientations, list):
+                _corner_orientations = torch.tensor(corner_orientations)
+                if corner_orientations.size() == (8, 2):
+                    _corner_orientations = _corner_orientations.to(torch.float16)
+                elif corner_orientations.size() == (8,):
+                    _corner_orientations = torch.stack([
+                        get_twist_vec(t) for t in corner_orientations
+                    ], dim=0).to(torch.float16)
+                else:
+                    raise ValueError(
+                        "corner_orientations must be of size (8, 2) or (8,)")
+                corner_orientations = _corner_orientations
+            if isinstance(edge_positions, list):
+                edge_positions = torch.tensor(
+                    edge_positions, dtype=torch.int8)
+            if isinstance(edge_orientations, list):
+                edge_orientations = torch.tensor(
+                    edge_orientations, dtype=torch.int8)
             self.corner_positions = corner_positions
             self.corner_orientations = corner_orientations
             self.edge_positions = edge_positions
