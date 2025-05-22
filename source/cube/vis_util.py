@@ -15,6 +15,10 @@ L F R B
   5
 で並べる
 
+X: R L
+Y: U D
+Z: F B
+
 各面は展開図において上から見て以下のようなナンバリングになる
 [[0,0], [0,1], [0,2],]
 [[1,0], [1,1], [1,2],]
@@ -50,17 +54,17 @@ FP20, FP21, FP22 = ((2,0), (2,1), (2,2))
 
 # それぞれの面に対して、角と辺の位置を入れていく
 # 角と面の向きの関係
-# 面の番号が少ない方から時計回りが面の番号が入る
 # その場所にあるサブキューブの向きが入る
+# X Y Z の順番で入れる
 CORNER_FACES = torch.tensor([
     [L, U, B], # 0
     [R, U, B], # 1
-    [F, U, R], # 2
-    [F, L, U], # 3
-    [L, B, D], # 4
+    [R, U, F], # 2
+    [L, U, F], # 3
+    [L, D, B], # 4
     [R, D, B], # 5
-    [F, R, D], # 6
-    [F, D, L], # 7
+    [R, D, F], # 6
+    [L, D, F], # 7
 ], dtype=torch.int64)
 
 # F00, F02, F20, F22のどれか
@@ -68,41 +72,41 @@ CORNER_FACES = torch.tensor([
 CORNER_SUBCUBES = torch.tensor([
     [FP00, FP00, FP02], # 0
     [FP02, FP02, FP00], # 1
-    [FP02, FP22, FP00], # 2
-    [FP00, FP02, FP20], # 3
-    [FP20, FP22, FP20], # 4
+    [FP00, FP22, FP02], # 2
+    [FP02, FP20, FP00], # 3
+    [FP20, FP20, FP22], # 4
     [FP22, FP22, FP20], # 5
-    [FP22, FP20, FP02], # 6
-    [FP20, FP00, FP22], # 7
+    [FP20, FP02, FP22], # 6
+    [FP22, FP00, FP20], # 7
 ], dtype=torch.int64)
 
 EDGE_FACES = torch.tensor([
     [L,B], # E00
     [R,B], # E01
-    [F,R], # E02
-    [F,L], # E03
-    [B,U], # E04
+    [R,F], # E02
+    [L,F], # E03
+    [U,B], # E04
     [R,U], # E05
-    [F,U], # E06
+    [U,F], # E06
     [L,U], # E07
-    [B,D], # E08
+    [D,B], # E08
     [R,D], # E09
-    [F,D], # E10
+    [D,F], # E10
     [L,D], # E11
 ], dtype=torch.int64)
 
 EDGE_SUBCUBES = torch.tensor([
     [FP10, FP12], # E00
     [FP12, FP10], # E01
-    [FP12, FP10], # E02
-    [FP10, FP12], # E03
+    [FP10, FP12], # E02
+    [FP12, FP10], # E03
     [FP01, FP01], # E04
     [FP01, FP12], # E05
-    [FP01, FP21], # E06
+    [FP21, FP01], # E06
     [FP01, FP10], # E07
     [FP21, FP21], # E08
     [FP21, FP12], # E09
-    [FP21, FP01], # E10
+    [FP01, FP21], # E10
     [FP21, FP10], # E11
 ], dtype=torch.int64)
 
@@ -181,4 +185,5 @@ if __name__ == "__main__":
     
     state_to_net(State())
     state_to_net(r)
+    state_to_net(r-r)
     
