@@ -1,4 +1,4 @@
-from state import State, TWIST_TABLE
+from state import State
 import torch
 
 """
