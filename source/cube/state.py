@@ -143,42 +143,41 @@ class State:
             edge_orientations=self.edge_orientations.clone())
         
     def _corner_apply(self,
-                    p:torch.Tensor, o:torch.Tensor,
                     sp:torch.Tensor, so:torch.Tensor)->tuple[torch.Tensor]:
         """_summary_
         immutable
         """
         
-        p = p[sp.to(torch.int64)].clone()
+        p = self.corner_positions[sp.to(torch.int64)].clone()
+        o = self.corner_orientations
         so = so[sp.to(torch.int64)].clone()
         o = torch.stack([
-            # cos(a-b) = cos(a)cos(b) + sin(a)sin(b)
-            o[:,0] * so[:,0] + o[:,1] * so[:,1],
-            # sin(a-b) = sin(a)cos(b) - cos(a)sin(b)
-            o[:,1] * so[:,0] - o[:,0] * so[:,1],
+            # cos(a+b) = cos(a)cos(b) + sin(a)sin(b)
+            o[:,0] * so[:,0] - o[:,1] * so[:,1],
+            # sin(a+b) = sin(a)cos(b) - cos(a)sin(b)
+            o[:,1] * so[:,0] + o[:,0] * so[:,1],
         ], dim=1)
         return (p, o)
     
     def _edge_apply(self,
-                    p:torch.Tensor, o:torch.Tensor,
                     sp:torch.Tensor, so:torch.Tensor)->tuple[torch.Tensor]:
         """_summary_
         immutable
         """
-        
-        p = p[sp.to(torch.int64)].clone()
+        p = self.edge_positions[sp.to(torch.int64)].clone()
         so = so[sp.to(torch.int64)].clone()
+        o = self.edge_orientations
         o = o*so
         return (p, o)
     
     
     def _apply(self, state:State)->tuple[torch.Tensor]:
         cp, co = self._corner_apply(
-            self.corner_positions, self.corner_orientations,
-            state.corner_positions, state.corner_orientations)
+            state.corner_positions, 
+            state.corner_orientations)
         ep, eo = self._edge_apply(
-            self.edge_positions, self.edge_orientations,
-            state.edge_positions, state.edge_orientations)
+            state.edge_positions, 
+            state.edge_orientations)
         return (cp, co, ep, eo)
     
     def apply(self, state:State):
@@ -331,12 +330,15 @@ MOVES = {
 }
  
 if __name__ == "__main__":
+    import vis_util as vis
     s = State()
     # print(s)
     # print(s+s)
-    # print(s + MOVES['R'])
-    # print(MOVES['R'])
+    print(s + MOVES['R'] == MOVES['R'])
+    print(s + MOVES['R'])
+    print(MOVES['R'])
     # print(MOVES['R'] + MOVES['R'])
-    print(MOVES['R'] + MOVES['R'] + MOVES['R'] + MOVES['R'])
-    print(4 * MOVES['R'])
-    # print(MOVES['R']*2)
+    # print(MOVES['R'] + MOVES['R'] + MOVES['R'] + MOVES['R'])
+    # print(4 * MOVES['R'])
+    # vis.state_to_net(MOVES['R']*2)
+    # print(State())
