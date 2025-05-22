@@ -105,12 +105,11 @@ class State:
                     corner_positions, dtype=torch.int8)
             if isinstance(corner_orientations, list):
                 _corner_orientations = torch.tensor(corner_orientations)
-                if corner_orientations.size() == (8, 2):
+                if _corner_orientations.size() == (8, 2):
                     _corner_orientations = _corner_orientations.to(torch.float16)
-                elif corner_orientations.size() == (8,):
-                    _corner_orientations = torch.stack([
-                        get_twist_vec(t) for t in corner_orientations
-                    ], dim=0).to(torch.float16)
+                elif _corner_orientations.size() == (8,):
+                    twist_vecs = [torch.tensor(get_twist_vec(t)) for t in corner_orientations]
+                    _corner_orientations = torch.stack(twist_vecs, dim=0).to(torch.float16)
                 else:
                     raise ValueError(
                         "corner_orientations must be of size (8, 2) or (8,)")
