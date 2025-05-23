@@ -332,16 +332,8 @@ MOVES = {
 if __name__ == "__main__":
     import vis_util as vis
     s = State()
-    # print(s)
-    # print(s+s)
-    # print(s + MOVES['R'] == MOVES['R'])
-    # print(s + MOVES['R'])
-    # print(MOVES['R']+MOVES['R'])
-    print(s - MOVES['R'])
-    print(3*MOVES['R'])
-    print(MOVES['R']-MOVES['R'])
-    # print(MOVES['R'] + MOVES['R'])
-    # print(MOVES['R'] + MOVES['R'] + MOVES['R'] + MOVES['R'])
-    # print(4 * MOVES['R'])
-    # vis.state_to_net(MOVES['R']*2)
-    # print(State())
+    r = MOVES['R']
+    
+    print(r + r)
+    print(r + r + r)
+    print(r + r + r + r)

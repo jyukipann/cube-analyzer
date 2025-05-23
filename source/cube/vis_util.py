@@ -121,19 +121,16 @@ def state_to_net(state: State)->torch.Tensor:
     
     # conner
     slicer_cp = state.corner_positions.to(torch.int64)
-    corner_faces = CORNER_FACES[slicer_cp]
+    corner_faces = CORNER_FACES[slicer_cp] # 入れ替え後のsubcubeの色のリスト
     corner_twists = state.twist_co
     corner_subcube_positions = CORNER_SUBCUBES
-    ## corner_facesをtwist分だけ回転させる
-    corner_twists = corner_twists.unsqueeze(1).view(-1, 1).to(torch.int64) 
-    corner_faces_rotated = torch.empty_like(corner_faces)
-    for i in range(8):
-        # subcube回転
-        corner_faces_rotated[i] = torch.roll(corner_faces[i], -corner_twists[i].item())
+    for CF, csf, cf, tw in zip(CORNER_FACES, corner_subcube_positions, corner_faces, corner_twists):
+        twist = corner_twists[i]
+        for j in range(3):
         # subcubeの位置に値を入れる
-        net[CORNER_FACES[i, 0], *corner_subcube_positions[i, 0]] = corner_faces_rotated[i][0]
-        net[CORNER_FACES[i, 1], *corner_subcube_positions[i, 1]] = corner_faces_rotated[i][1]
-        net[CORNER_FACES[i, 2], *corner_subcube_positions[i, 2]] = corner_faces_rotated[i][2]
+            net[CORNER_FACES[i, 0], *corner_subcube_positions[i, 0]] = corner_faces[i][0+twist]
+            net[CORNER_FACES[i, 1], *corner_subcube_positions[i, 1]] = corner_faces[i][1+twist]
+            net[CORNER_FACES[i, 2], *corner_subcube_positions[i, 2]] = corner_faces[i][2+twist]
 
     # edge
     slicer_ep = state.edge_positions.to(torch.int64)
@@ -174,8 +171,16 @@ if __name__ == "__main__":
     
     # state_to_net(State())
     # print(moves['R'])
-    state_to_net(moves['R'])
-    state_to_net(moves['R']+moves['R'])
+    r = State(
+        corner_positions=moves['R'].corner_positions,
+        corner_orientations=[0, 0, 0, 0, 0, 0, 0, 0],
+        edge_positions=moves['R'].edge_positions,
+        edge_orientations=moves['R'].edge_orientations,
+    )
+    print(r)
+    state_to_net(r)
+    # state_to_net(moves['R'])
+    # state_to_net(moves['R']+moves['R'])
     # state_to_net(moves['U'])
     # print(State())
     # state_to_net(moves['U'])
