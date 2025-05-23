@@ -334,6 +334,14 @@ if __name__ == "__main__":
     s = State()
     r = MOVES['R']
     
-    print(r + r)
-    print(r + r + r)
-    print(r + r + r + r)
+    # print(r + r)
+    # print(r + r + r)
+    # print(r + r + r + r)
+    
+    # print(-r)
+    # print(-r + r)
+    # print(s == -r + r)
+    
+    print(s == -MOVES['U'] + MOVES['U'])
+    print(s == -MOVES['R'] + MOVES['R'])
+    print(s == -MOVES['B'] + MOVES['B'])
