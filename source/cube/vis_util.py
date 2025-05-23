@@ -180,7 +180,7 @@ if __name__ == "__main__":
     print(r)
     state_to_net(r)
     # state_to_net(moves['R'])
-    # state_to_net(moves['R']+moves['R'])
+    # state_to_net(moves['R'] @ moves['R'])
     # state_to_net(moves['U'])
     # print(State())
     # state_to_net(moves['U'])
