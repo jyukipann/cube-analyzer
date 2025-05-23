@@ -124,13 +124,27 @@ def state_to_net(state: State)->torch.Tensor:
     corner_faces = CORNER_FACES[slicer_cp] # 入れ替え後のsubcubeの色のリスト
     corner_twists = state.twist_co
     corner_subcube_positions = CORNER_SUBCUBES
-    for CF, csf, cf, tw in zip(CORNER_FACES, corner_subcube_positions, corner_faces, corner_twists):
-        twist = corner_twists[i]
-        for j in range(3):
+    for CF, csf, cf, tw in zip(
+            CORNER_FACES, corner_subcube_positions, corner_faces, corner_twists):
+        
         # subcubeの位置に値を入れる
-            net[CORNER_FACES[i, 0], *corner_subcube_positions[i, 0]] = corner_faces[i][0+twist]
-            net[CORNER_FACES[i, 1], *corner_subcube_positions[i, 1]] = corner_faces[i][1+twist]
-            net[CORNER_FACES[i, 2], *corner_subcube_positions[i, 2]] = corner_faces[i][2+twist]
+        # X軸は注意 R L 
+        if CF[0] == R or CF[0] == L:
+            print("X軸")
+            if tw == 0:
+                print("tw == 0")
+                net[CF[0], *csf[0]] = cf[0]
+                net[CF[1], *csf[1]] = cf[1]
+                net[CF[2], *csf[2]] = cf[2]
+            else:
+                net[CF[0], *csf[0]] = cf[0]
+                net[CF[1], *csf[1]], net[CF[2], *csf[2]] = (
+                    (cf[1], cf[2]) if tw == 1 else (cf[2], cf[1]))
+        else:
+            net[CF[0], *csf[0]] = cf[(0 + tw) % 3]
+            net[CF[1], *csf[1]] = cf[(1 + tw) % 3]
+            net[CF[2], *csf[2]] = cf[(2 + tw) % 3]
+        
 
     # edge
     slicer_ep = state.edge_positions.to(torch.int64)
@@ -171,12 +185,13 @@ if __name__ == "__main__":
     
     # state_to_net(State())
     # print(moves['R'])
-    r = State(
-        corner_positions=moves['R'].corner_positions,
-        corner_orientations=[0, 0, 0, 0, 0, 0, 0, 0],
-        edge_positions=moves['R'].edge_positions,
-        edge_orientations=moves['R'].edge_orientations,
-    )
+    # r = State(
+    #     corner_positions=moves['R'].corner_positions,
+    #     corner_orientations=[0, 0, 0, 0, 0, 0, 0, 0],
+    #     edge_positions=moves['R'].edge_positions,
+    #     edge_orientations=moves['R'].edge_orientations,
+    # )
+    r = moves['R']
     print(r)
     state_to_net(r)
     # state_to_net(moves['R'])
