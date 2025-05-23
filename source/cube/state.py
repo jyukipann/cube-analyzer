@@ -229,14 +229,7 @@ class State:
         self.apply(state)
         return self
     
-    def __sub__(self, state:State)->State:
-        return self.get_applied(-state)
-    
-    def __isub__(self, state:State)->State:
-        self.apply(-state)
-        return self
-    
-    def __neg__(self)->State:
+    def __invert__(self)->State:
         icp = inverse_permutation(self.corner_positions)
         iep = inverse_permutation(self.edge_positions)
         
@@ -338,10 +331,10 @@ if __name__ == "__main__":
     # print(r @ r @ r)
     # print(r @ r @ r @ r)
     
-    # print(-r)
-    # print(-r @ r)
-    # print(s == -r @ r)
+    # print(~r)
+    # print(~r @ r)
+    # print(s == ~r @ r)
     
-    print(s == -MOVES['U'] @ MOVES['U'])
-    print(s == -MOVES['R'] @ MOVES['R'])
-    print(s == -MOVES['B'] @ MOVES['B'])
+    print(s == ~MOVES['U'] @ MOVES['U'])
+    print(s == ~MOVES['R'] @ MOVES['R'])
+    print(s == ~MOVES['B'] @ MOVES['B'])
