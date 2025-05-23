@@ -111,7 +111,7 @@ EDGE_SUBCUBES = torch.tensor([
 
 
 def state_to_net(state: State)->torch.Tensor:
-    net = torch.zeros((6, 3, 3), dtype=torch.int8)+9
+    net = torch.zeros((6, 3, 3), dtype=torch.int8) + 9 # 9は空白を表す
     
     # center
     (
@@ -120,47 +120,74 @@ def state_to_net(state: State)->torch.Tensor:
     ) = tuple(range(6))
     
     # conner
-    slicer_cp = state.corner_positions.to(torch.int64)
-    corner_faces = CORNER_FACES[slicer_cp] # 入れ替え後のsubcubeの色のリスト
-    corner_twists = state.twist_co
-    corner_subcube_positions = CORNER_SUBCUBES
-    for CF, csf, cf, tw in zip(
-            CORNER_FACES, corner_subcube_positions, corner_faces, corner_twists):
-        
-        # subcubeの位置に値を入れる
-        # X軸は注意 R L 
-        if CF[0] == R or CF[0] == L:
-            print("X軸")
-            if tw == 0:
-                print("tw == 0")
-                net[CF[0], *csf[0]] = cf[0]
-                net[CF[1], *csf[1]] = cf[1]
-                net[CF[2], *csf[2]] = cf[2]
-            else:
-                net[CF[0], *csf[0]] = cf[0]
-                net[CF[1], *csf[1]], net[CF[2], *csf[2]] = (
-                    (cf[1], cf[2]) if tw == 1 else (cf[2], cf[1]))
-        else:
-            net[CF[0], *csf[0]] = cf[(0 + tw) % 3]
-            net[CF[1], *csf[1]] = cf[(1 + tw) % 3]
-            net[CF[2], *csf[2]] = cf[(2 + tw) % 3]
-        
-
-    # edge
-    slicer_ep = state.edge_positions.to(torch.int64)
-    edge_faces = EDGE_FACES[slicer_ep]
-    edge_twists = state.twist_eo
-    edge_subcube_positions = EDGE_SUBCUBES
-    for i in range(12):
-        # subcubeフリップ
-        is_flipped = edge_twists[i]
-        # subcubeの位置に値を入れる
-        net[EDGE_FACES[i, 0], *edge_subcube_positions[i, 0]] = edge_faces[i][is_flipped]
-        net[EDGE_FACES[i, 1], *edge_subcube_positions[i, 1]] = edge_faces[i][(is_flipped+1)%2]
+    _state_to_net_corner(state, net)
     
+    # edge
+    # _state_to_net_edge(state, net)
+
     print_net(net)
 
     return net
+
+# twistとsubecubeの展開の対応関係
+TWIST_SUBCUBE_MAP = {
+    C00: [(0, 1, 2), (0, 1, 2), (0, 1, 2)],
+    C01: [(0, 1, 2), (0, 2, 1), (0, 2, 1)],
+    C02: [(0, 1, 2), (1, 0, 2), (1, 0, 2)],
+    C03: [(0, 1, 2), (1, 2, 0), (0, 1, 2)],
+    C04: [(0, 1, 2), (2, 0, 1), (2, 0, 1)],
+    C05: [(0, 1, 2), (2, 1, 0), (2, 1, 0)],
+    C06: [(0, 1, 2), (2, 1, 0), (2, 1, 0)],
+    C07: [(0, 1, 2), (2, 0, 1), (2, 0, 1)],
+}
+
+def _state_to_net_corner(state: State, net:torch.Tensor)->None:
+    # エレガントは捨ててナイーブに
+    
+    # 入れ替え後の各subcubeの位置と色
+    subcubes = CORNER_FACES[state.corner_positions.to(torch.int64)]
+    twists = state.twist_co
+    # print(CORNER_FACES)
+    # print(subcubes)
+    # print(twists)
+    for C_ID in range(8):
+        cf = CORNER_FACES[C_ID]
+        cfp = CORNER_SUBCUBES[C_ID]
+        sc = subcubes[C_ID]
+        tw = twists[C_ID]
+        tsm = TWIST_SUBCUBE_MAP[C_ID][tw]
+        net[cf[0], *cfp[0]] = sc[tsm[0]]
+        net[cf[1], *cfp[1]] = sc[tsm[1]]
+        net[cf[2], *cfp[2]] = sc[tsm[2]]
+    
+FLIP_SUBCUBE_MAP = {
+    E00: [(0, 1), (0, 1)],
+    E01: [(0, 1), (0, 1)],
+    E02: [(0, 1), (0, 1)],
+    E03: [(0, 1), (0, 1)],
+    E04: [(0, 1), (0, 1)],
+    E05: [(0, 1), (0, 1)],
+    E06: [(0, 1), (0, 1)],
+    E07: [(0, 1), (0, 1)],
+    E08: [(0, 1), (0, 1)],
+    E09: [(0, 1), (0, 1)],
+    E10: [(0, 1), (0, 1)],
+    E11: [(0, 1), (0, 1)],   
+}
+def _state_to_net_edge(state: State, net:torch.Tensor)->None:
+    # エレガントは捨ててナイーブに
+    
+    # 入れ替え後の各subcubeの位置と色
+    subcubes = EDGE_FACES[state.edge_positions.to(torch.int64)]
+    flips = state.twist_eo
+    for E_ID in range(12):
+        ef = EDGE_FACES[E_ID]
+        efp = EDGE_SUBCUBES[E_ID]
+        sc = subcubes[E_ID]
+        fl = flips[E_ID]
+        tsm = FLIP_SUBCUBE_MAP[E_ID][fl]
+        net[ef[0], *efp[0]] = sc[tsm[0]]
+        net[ef[1], *efp[1]] = sc[tsm[1]]
 
 def print_net(net:torch.Tensor):
     net_for_print = f"""
@@ -192,8 +219,13 @@ if __name__ == "__main__":
     #     edge_orientations=moves['R'].edge_orientations,
     # )
     r = moves['R']
-    print(r)
-    state_to_net(r)
+    l = moves['L']
+    rl = moves['R'] @ moves['L']
+    # print(r)
+    # state_to_net(r)
+    print('lr')
+    print(rl)
+    state_to_net(rl)
     # state_to_net(moves['R'])
     # state_to_net(moves['R'] @ moves['R'])
     # state_to_net(moves['U'])
