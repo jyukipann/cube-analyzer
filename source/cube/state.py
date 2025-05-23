@@ -222,10 +222,10 @@ class State:
             f"edge_orientations {self.edge_orientations.size()}: {self.twist_eo.tolist()}\n"
         )
         
-    def __add__(self, state:State)->State:
+    def __matmul__(self, state:State)->State:
         return self.get_applied(state)
     
-    def __iadd__(self, state:State)->State:
+    def __imatmul__(self, state:State)->State:
         self.apply(state)
         return self
     
@@ -262,7 +262,7 @@ class State:
         if n < 0:
             move = -move
         for _ in range(abs(n-1)):
-            s = s + move
+            s = s @ move
         return s
 
     def __rmul__(self, n:int)->State:
@@ -334,14 +334,14 @@ if __name__ == "__main__":
     s = State()
     r = MOVES['R']
     
-    # print(r + r)
-    # print(r + r + r)
-    # print(r + r + r + r)
+    # print(r @ r)
+    # print(r @ r @ r)
+    # print(r @ r @ r @ r)
     
     # print(-r)
-    # print(-r + r)
-    # print(s == -r + r)
+    # print(-r @ r)
+    # print(s == -r @ r)
     
-    print(s == -MOVES['U'] + MOVES['U'])
-    print(s == -MOVES['R'] + MOVES['R'])
-    print(s == -MOVES['B'] + MOVES['B'])
+    print(s == -MOVES['U'] @ MOVES['U'])
+    print(s == -MOVES['R'] @ MOVES['R'])
+    print(s == -MOVES['B'] @ MOVES['B'])
