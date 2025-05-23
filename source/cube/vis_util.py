@@ -134,11 +134,11 @@ TWIST_SUBCUBE_MAP = {
     C00: [(0, 1, 2), (0, 1, 2), (0, 1, 2)],
     C01: [(0, 1, 2), (0, 1, 2), (0, 2, 1)],
     C02: [(0, 1, 2), (1, 0, 2), (0, 1, 2)],
-    C03: [(0, 1, 2), (1, 2, 0), (0, 1, 2)],
-    C04: [(0, 1, 2), (2, 0, 1), (0, 2, 1)],
+    C03: [(0, 1, 2), (0, 1, 2), (0, 1, 2)],
+    C04: [(0, 1, 2), (0, 2, 1), (0, 2, 1)],
     C05: [(0, 1, 2), (2, 1, 0), (0, 2, 1)],
     C06: [(0, 1, 2), (0, 2, 1), (2, 1, 0)],
-    C07: [(0, 1, 2), (0, 2, 1), (0, 1, 2)],
+    C07: [(0, 1, 2), (0, 2, 1), (0, 2, 1)],
 }
 
 def _state_to_net_corner(state: State, net:torch.Tensor)->None:
@@ -210,26 +210,8 @@ def print_net(net:torch.Tensor):
 if __name__ == "__main__":
     from state import MOVES as moves
     
-    # state_to_net(State())
-    # print(moves['R'])
-    # r = State(
-    #     corner_positions=moves['R'].corner_positions,
-    #     corner_orientations=[0, 0, 0, 0, 0, 0, 0, 0],
-    #     edge_positions=moves['R'].edge_positions,
-    #     edge_orientations=moves['R'].edge_orientations,
-    # )
     r = moves['R']
     l = moves['L']
     rl = moves['R'] @ moves['L']
-    # print(r)
-    # state_to_net(r)
-    print('lr')
-    print(rl)
-    state_to_net(rl)
-    # state_to_net(moves['R'])
-    # state_to_net(moves['R'] @ moves['R'])
-    # state_to_net(moves['U'])
-    # print(State())
-    # state_to_net(moves['U'])
-    # state_to_net(moves['L'])
-    
+    print(~rl)
+    state_to_net(~rl)
