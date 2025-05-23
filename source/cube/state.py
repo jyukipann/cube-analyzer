@@ -16,7 +16,7 @@ def inverse_permutation(p:torch.Tensor)->torch.Tensor:
 
 def inverse_orientation(o:torch.Tensor)->torch.Tensor:
     o = o.clone()
-    o[:,1] = -o[:,1]
+    o[:,1] *= -1
     return o
 
 def inverse_orientation_int(o:torch.Tensor)->torch.Tensor:
@@ -151,11 +151,12 @@ class State:
         p = self.corner_positions[sp.to(torch.int64)].clone()
         # so = so[sp.to(torch.int64)].clone()
         o = self.corner_orientations
+
         o = torch.stack([
             # cos(a+b) = cos(a)cos(b) + sin(a)sin(b)
-            o[:,0] * so[:,0] + o[:,1] * so[:,1],
+            o[:, 0] * so[:, 0] - o[:, 1] * so[:, 1],
             # sin(a+b) = sin(a)cos(b) - cos(a)sin(b)
-            o[:,1] * so[:,0] - o[:,0] * so[:,1],
+            o[:, 1] * so[:, 0] + o[:, 0] * so[:, 1],
         ], dim=1)
         return (p, o)
     
@@ -233,15 +234,17 @@ class State:
         icp = inverse_permutation(self.corner_positions)
         iep = inverse_permutation(self.edge_positions)
         
-        ico = inverse_orientation(self.corner_orientations)[icp.to(torch.int64)]
-        ieo = inverse_orientation_int(self.edge_orientations)[iep.to(torch.int64)]
-        
-        return State(
+        ico = inverse_orientation(self.corner_orientations)
+        ieo = inverse_orientation_int(self.edge_orientations)
+        ret = State(
             corner_positions=icp,
             corner_orientations=ico,
             edge_positions=iep,
             edge_orientations=ieo)
         
+        # assert State() == self @ ret, f"Cube state inversion failed.\nself\n{self}\ninv\n{ret}"
+        
+        return ret
     def __mul__(self, n:int)->State:
         assert isinstance(n, int), "Not Defined multiplication by non-integer"
         assert n != 0, "Not Defined multiplication by 0"
@@ -327,6 +330,9 @@ if __name__ == "__main__":
     s = State()
     r = MOVES['R']
     
+    print(r @ (~r) == State())
+    print(s @ r == r)
+    
     # print(r @ r)
     # print(r @ r @ r)
     # print(r @ r @ r @ r)
@@ -335,6 +341,27 @@ if __name__ == "__main__":
     # print(~r @ r)
     # print(s == ~r @ r)
     
-    print(s == ~MOVES['U'] @ MOVES['U'])
-    print(s == ~MOVES['R'] @ MOVES['R'])
-    print(s == ~MOVES['B'] @ MOVES['B'])
+    # print(s == ~(MOVES['U'] @ MOVES['D']) @ MOVES['U'] @ MOVES['D'])
+    # print(s == ~(MOVES['R'] @ MOVES['L']) @ MOVES['R'] @ MOVES['L'])
+    # print(s == ~(MOVES['B'] @ MOVES['F']) @ MOVES['B'] @ MOVES['F'])
+    
+    # print(~(MOVES['U'] @ MOVES['D']) @ MOVES['U'] @ MOVES['D'])
+    # print(~(MOVES['R'] @ MOVES['L']) @ MOVES['R'] @ MOVES['L'])
+    # print(~(MOVES['B'] @ MOVES['F']) @ MOVES['B'] @ MOVES['F'])
+    # print(~(MOVES['R']) @ MOVES['R'])
+    # print(~(MOVES['L']) @ MOVES['L'])
+
+    # r_prime = r @ r @ r
+    # print(r_prime)
+    # print(s @ r_prime @ r)
+    # print(~r)
+    # print(r @ r)
+    # print((~r) @ (~r))
+    # print(s @ r @ (~r))
+    
+    # print(~r == r_prime)
+    # print(2*r == r@r)
+    # print(s @ r)
+    # print("s == s @ r @ (~r)", s == s @ r @ (~r))
+    # print("s == (r @ (~r))", s == (r @ (~r)))
+
