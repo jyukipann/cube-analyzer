@@ -110,7 +110,7 @@ EDGE_SUBCUBES = torch.tensor([
 ], dtype=torch.int64)
 
 
-def state_to_net(state: State)->torch.Tensor:
+def state_to_net(state: State, override_map_corner:list[tuple[int]]=None)->torch.Tensor:
     net = torch.zeros((6, 3, 3), dtype=torch.int8) + 9 # 9は空白を表す
     
     # center
@@ -120,20 +120,18 @@ def state_to_net(state: State)->torch.Tensor:
     ) = tuple(range(6))
     
     # conner
-    _state_to_net_corner(state, net)
+    _state_to_net_corner(state, net, override_map_corner)
     
     # edge
     # _state_to_net_edge(state, net)
-
-    print_net(net)
 
     return net
 
 # twistとsubecubeの展開の対応関係
 TWIST_SUBCUBE_MAP = {
-    C00: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
+    C00: [(2, 0, 1), (0, 1, 2), (1, 2, 0)],
     C01: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
-    C02: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
+    C02: [(2, 0, 1), (1, 2, 0), (0, 1, 2)],
     C03: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
     C04: [(2, 1, 0), (0, 2, 1), (0, 1, 2)],
     C05: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
@@ -141,7 +139,12 @@ TWIST_SUBCUBE_MAP = {
     C07: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
 }
 
-def _state_to_net_corner(state: State, net:torch.Tensor)->None:
+def _state_to_net_corner(
+        state: State,
+        net:torch.Tensor,
+        override_map:list[tuple[int]]=None)->None:
+    
+    subcube_map = TWIST_SUBCUBE_MAP if override_map is None else override_map
     # エレガントは捨ててナイーブに
     
     # 入れ替え後の各subcubeの位置と色
@@ -155,7 +158,7 @@ def _state_to_net_corner(state: State, net:torch.Tensor)->None:
         cfp = CORNER_SUBCUBES[C_ID]
         sc = subcubes[C_ID]
         tw = twists[C_ID]
-        tsm = TWIST_SUBCUBE_MAP[C_ID][tw]
+        tsm = subcube_map[C_ID][tw]
         net[cf[0], *cfp[0]] = sc[tsm[0]]
         net[cf[1], *cfp[1]] = sc[tsm[1]]
         net[cf[2], *cfp[2]] = sc[tsm[2]]
@@ -174,7 +177,10 @@ FLIP_SUBCUBE_MAP = {
     E10: [(0, 1), (0, 1)],
     E11: [(0, 1), (0, 1)],   
 }
-def _state_to_net_edge(state: State, net:torch.Tensor)->None:
+def _state_to_net_edge(state: State, net:torch.Tensor, override_map:list[tuple[int]]=None)->None:
+    
+    subcube_map = FLIP_SUBCUBE_MAP if override_map is None else override_map
+    
     # エレガントは捨ててナイーブに
     
     # 入れ替え後の各subcubeの位置と色
@@ -185,7 +191,7 @@ def _state_to_net_edge(state: State, net:torch.Tensor)->None:
         efp = EDGE_SUBCUBES[E_ID]
         sc = subcubes[E_ID]
         fl = flips[E_ID]
-        tsm = FLIP_SUBCUBE_MAP[E_ID][fl]
+        tsm = subcube_map[E_ID][fl]
         net[ef[0], *efp[0]] = sc[tsm[0]]
         net[ef[1], *efp[1]] = sc[tsm[1]]
 
@@ -210,12 +216,29 @@ def print_net(net:torch.Tensor):
 if __name__ == "__main__":
     from state import MOVES as moves
     
+    old_map_corner =  {
+        C00: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
+        C01: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
+        C02: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
+        C03: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
+        C04: [(2, 1, 0), (0, 2, 1), (0, 1, 2)],
+        C05: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
+        C06: [(2, 1, 0), (0, 2, 1), (0, 1, 2)],
+        C07: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
+    }
+    
     r = moves['R']
     l = moves['L']
     u = moves['U']
     d = moves['D']
     f = moves['F']
     b = moves['B']
-    target = u @ d
+    target = f @ b
     print(target)
-    state_to_net(target)
+    print_net(state_to_net(target))
+    print(~target)
+    print_net(state_to_net(~target))
+    
+    print(torch.all(state_to_net(r@l) == state_to_net(r@l, old_map_corner)))
+    print(torch.all(state_to_net(~(r@l)) == state_to_net(~(r@l), old_map_corner)))
+    
