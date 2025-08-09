@@ -129,9 +129,9 @@ def state_to_net(state: State, override_map_corner:list[tuple[int]]=None)->torch
 
 # twistとsubecubeの展開の対応関係
 TWIST_SUBCUBE_MAP = {
-    C00: [(2, 0, 1), (0, 1, 2), (1, 2, 0)],
+    C00: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
     C01: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
-    C02: [(2, 0, 1), (1, 2, 0), (0, 1, 2)],
+    C02: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
     C03: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
     C04: [(2, 1, 0), (0, 2, 1), (0, 1, 2)],
     C05: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
@@ -227,18 +227,27 @@ if __name__ == "__main__":
         C07: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
     }
     
+    pn = print_net
+    stn = state_to_net
+    
+    
     r = moves['R']
     l = moves['L']
     u = moves['U']
     d = moves['D']
     f = moves['F']
     b = moves['B']
-    target = f @ b
-    print(target)
-    print_net(state_to_net(target))
-    print(~target)
-    print_net(state_to_net(~target))
-    
-    print(torch.all(state_to_net(r@l) == state_to_net(r@l, old_map_corner)))
-    print(torch.all(state_to_net(~(r@l)) == state_to_net(~(r@l), old_map_corner)))
-    
+
+    print(r @ l)
+    pn(stn(r @ l))
+    print(u @ d)
+    pn(stn(u @ d))
+    print(f @ b)
+    pn(stn(f @ b))
+
+    print(torch.all(stn(r@l) == stn(r@l, old_map_corner)))
+    print(torch.all(stn(~(r@l)) == stn(~(r@l), old_map_corner)))
+    print(torch.all(stn(f@b) == stn(f@b, old_map_corner)))
+    print(torch.all(stn(~(f@b)) == stn(~(f@b), old_map_corner)))
+    print(torch.all(stn(u@d) == stn(u@d, old_map_corner)))
+    print(torch.all(stn(~(u@d)) == stn(~(u@d), old_map_corner)))
