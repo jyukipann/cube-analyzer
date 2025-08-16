@@ -139,26 +139,25 @@ TWIST_SUBCUBE_MAP = {
     C07: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
 }
 
-def _state_to_net_corner(
-        state: State,
-        net:torch.Tensor,
-        override_map:list[tuple[int]]=None)->None:
-    
+def _state_to_net_corner(state: State, net: torch.Tensor, override_map: list[tuple[int]] = None) -> None:
     subcube_map = TWIST_SUBCUBE_MAP if override_map is None else override_map
-    # エレガントは捨ててナイーブに
-    
-    # 入れ替え後の各subcubeの位置と色
-    subcubes = CORNER_FACES[state.corner_positions.to(torch.int64)]
-    twists = state.twist_co
-    # print(CORNER_FACES)
-    # print(subcubes)
-    # print(twists)
-    for C_ID in range(8):
-        cf = CORNER_FACES[C_ID]
-        cfp = CORNER_SUBCUBES[C_ID]
-        sc = subcubes[C_ID]
-        tw = twists[C_ID]
-        tsm = subcube_map[C_ID][tw]
+
+    twists = state.twist_co  # ← ピースID基準のねじれ(0,1,2)
+
+    for pos in range(8):  # 位置ID
+        pid = int(state.corner_positions[pos])  # ← この位置にいる「ピースID」
+
+        # 位置posに対応する面と、ネット上の3マス（コーナーは3色）
+        cf  = CORNER_FACES[pos]
+        cfp = CORNER_SUBCUBES[pos]
+
+        # そのピースが持つ3面の色と、ねじれ
+        sc  = CORNER_FACES[pid]
+        tw  = int(twists[pid])
+
+        # ピースID×ねじれで割り当て順を決める
+        tsm = subcube_map[pid][tw]
+
         net[cf[0], *cfp[0]] = sc[tsm[0]]
         net[cf[1], *cfp[1]] = sc[tsm[1]]
         net[cf[2], *cfp[2]] = sc[tsm[2]]
