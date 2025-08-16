@@ -123,7 +123,7 @@ def state_to_net(state: State, override_map_corner:list[tuple[int]]=None)->torch
     _state_to_net_corner(state, net, override_map_corner)
     
     # edge
-    # _state_to_net_edge(state, net)
+    _state_to_net_edge(state, net)
 
     return net
 
@@ -176,21 +176,22 @@ FLIP_SUBCUBE_MAP = {
     E10: [(0, 1), (0, 1)],
     E11: [(0, 1), (0, 1)],   
 }
-def _state_to_net_edge(state: State, net:torch.Tensor, override_map:list[tuple[int]]=None)->None:
-    
+def _state_to_net_edge(state: State, net: torch.Tensor, override_map: list[tuple[int]] = None) -> None:
     subcube_map = FLIP_SUBCUBE_MAP if override_map is None else override_map
-    
-    # エレガントは捨ててナイーブに
-    
-    # 入れ替え後の各subcubeの位置と色
-    subcubes = EDGE_FACES[state.edge_positions.to(torch.int64)]
-    flips = state.twist_eo
-    for E_ID in range(12):
-        ef = EDGE_FACES[E_ID]
-        efp = EDGE_SUBCUBES[E_ID]
-        sc = subcubes[E_ID]
-        fl = flips[E_ID]
-        tsm = subcube_map[E_ID][fl]
+
+    flips = state.twist_eo  # ← ピースID基準 (0/1)
+
+    for pos in range(12):  # 位置ID
+        pid = int(state.edge_positions[pos])  # この位置にいる「エッジのピースID」
+
+        ef  = EDGE_FACES[pos]
+        efp = EDGE_SUBCUBES[pos]
+
+        sc  = EDGE_FACES[pid]   # そのピースが持つ2色
+        fl  = int(flips[pid])   # そのピースの反転
+
+        tsm = subcube_map[pid][fl]
+
         net[ef[0], *efp[0]] = sc[tsm[0]]
         net[ef[1], *efp[1]] = sc[tsm[1]]
 
