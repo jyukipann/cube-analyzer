@@ -276,13 +276,10 @@ class State:
         return ((self.edge_orientations.clone() - 1)/-2).to(torch.int8)
     
     @property
-    def twist_co(self)->torch.Tensor:
-        co = (
-            self.corner_orientations 
-            / 
-            torch.linalg.norm(self.corner_orientations)
-        )
-
+    def twist_co(self) -> torch.Tensor:
+        co = self.corner_orientations.clone()
+        norm = torch.linalg.norm(co, dim=1, keepdim=True).clamp_min(1e-8)
+        co = co / norm
         idx = torch.argmax(co @ TWIST_TABLE.T, dim=1).to(torch.int8)
         return idx
 
