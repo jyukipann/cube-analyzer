@@ -52,62 +52,128 @@ FP00, FP01, FP02 = ((0,0), (0,1), (0,2))
 FP10, FP11, FP12 = ((1,0), (1,1), (1,2))
 FP20, FP21, FP22 = ((2,0), (2,1), (2,2))
 
-# それぞれの面に対して、角と辺の位置を入れていく
-# 角と面の向きの関係
-# その場所にあるサブキューブの向きが入る
-# Xから始まり、反時計回りに入れていく
-CORNER_FACES = torch.tensor([
-    [L, B, U,], # 0
-    [R, U, B,], # 1
-    [R, F, U,], # 2
-    [L, U, F,], # 3
-    [L, D, B,], # 4
-    [R, D, B,], # 5
-    [R, D, F,], # 6
-    [L, D, F,], # 7
-], dtype=torch.int64)
+CORNER_FACES_POSITIONS = [
+    [
+        (L, FP00,),
+        (B, FP02,),
+        (U, FP00,),
+    ], # 0
+    [
+        (R, FP02,),
+        (U, FP02,),
+        (B, FP00,),
+    ], # 1
+    [
+        (R, FP00,),
+        (F, FP02,),
+        (U, FP22,),
+    ], # 2
+    [
+        (L, FP02,),
+        (U, FP20,),
+        (F, FP00,),
+    ], # 3
+    [
+        (L, FP20,),
+        (D, FP20,),
+        (B, FP22,),
+    ], # 4
+    [
+        (R, FP22,),
+        (D, FP22,),
+        (B, FP20,),
+    ], # 5
+    [
+        (R, FP20,),
+        (D, FP02,),
+        (F, FP22,),
+    ], # 6
+    [
+        (L, FP22,),
+        (D, FP00,),
+        (F, FP20,),
+    ], # 7
+]
+
+CORNER_FACES = torch.tensor(
+    [
+        [c for c, _ in color_positions] for color_positions in CORNER_FACES_POSITIONS
+    ], 
+    dtype=torch.int64
+)
 
 # F00, F02, F20, F22のどれか
-CORNER_SUBCUBES = torch.tensor([
-    [FP00, FP02, FP00,], # 0
-    [FP02, FP02, FP00,], # 1
-    [FP00, FP02, FP22,], # 2
-    [FP02, FP20, FP00,], # 3
-    [FP20, FP20, FP22,], # 4
-    [FP22, FP22, FP20,], # 5
-    [FP20, FP02, FP22,], # 6
-    [FP22, FP00, FP20,], # 7
-], dtype=torch.int64)
+CORNER_SUBCUBES = torch.tensor(
+    [
+        [p for _, p in color_positions] for color_positions in CORNER_FACES_POSITIONS
+    ], 
+    dtype=torch.int64
+)
 
-EDGE_FACES = torch.tensor([
-    [L, B,], # E00
-    [R, B,], # E01
-    [R, F,], # E02
-    [L, F,], # E03
-    [U, B,], # E04
-    [R, U,], # E05
-    [U, F,], # E06
-    [L, U,], # E07
-    [D, B,], # E08
-    [R, D,], # E09
-    [D, F,], # E10
-    [L, D,], # E11
-], dtype=torch.int64)
+EDGE_FACES_POSITIONS = [
+    [
+        (L, FP10,),
+        (B, FP12,),
+    ], # E00
+    [
+        (R, FP12,),
+        (B, FP10,),
+    ], # E01
+    [
+        (R, FP10,),
+        (F, FP12,),
+    ], # E02
+    [
+        (L, FP12,),
+        (F, FP10,),
+    ], # E03
+    [
+        (U, FP01,),
+        (B, FP01,),
+    ], # E04
+    [
+        (R, FP01,),
+        (U, FP12,),
+    ], # E05
+    [
+        (U, FP21,),
+        (F, FP01,),
+    ], # E06
+    [
+        (L, FP01,),
+        (U, FP10,),
+    ], # E07
+    [
+        (D, FP21,),
+        (B, FP21,),
+    ], # E08
+    [
+        (R, FP21,),
+        (D, FP12,),
+    ], # E09
+    [
+        (D, FP01,),
+        (F, FP21,),
+    ], # E10
+    [
+        (L, FP21,),
+        (D, FP10,),
+    ], # E11
+]
 
-EDGE_SUBCUBES = torch.tensor([
-    [FP10, FP12,], # E00
-    [FP12, FP10,], # E01
-    [FP10, FP12,], # E02
-    [FP12, FP10,], # E03
-    [FP01, FP01,], # E04
-    [FP01, FP12,], # E05
-    [FP21, FP01,], # E06
-    [FP01, FP10,], # E07
-    [FP21, FP21,], # E08
-    [FP21, FP12,], # E09
-    [FP01, FP21,], # E10
-    [FP21, FP10,], # E11
-], dtype=torch.int64)
+EDGE_FACES = torch.tensor(
+    [
+        [c for c, _ in color_positions] for color_positions in EDGE_FACES_POSITIONS
+    ],
+    dtype=torch.int64
+)
+
+EDGE_SUBCUBES = torch.tensor(
+    [
+        [p for _, p in color_positions] for color_positions in EDGE_FACES_POSITIONS
+    ], 
+    dtype=torch.int64
+)
 
 
 def state_to_net(state: State)->torch.Tensor:
