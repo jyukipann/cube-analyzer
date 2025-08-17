@@ -176,6 +176,7 @@ FLIP_SUBCUBE_MAP = {
     E10: [(0, 1), (0, 1)],
     E11: [(0, 1), (0, 1)],   
 }
+
 def _state_to_net_edge(state: State, net: torch.Tensor, override_map: list[tuple[int]] = None) -> None:
     subcube_map = FLIP_SUBCUBE_MAP if override_map is None else override_map
 
