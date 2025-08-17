@@ -110,19 +110,12 @@ EDGE_SUBCUBES = torch.tensor([
 ], dtype=torch.int64)
 
 
-def state_to_net(state: State, override_map_corner:list[tuple[int]]=None)->torch.Tensor:
-    net = torch.zeros((6, 3, 3), dtype=torch.int8) + 9 # 9は空白を表す
+def state_to_net(state: State)->torch.Tensor:
+    net = torch.ones((6, 3, 3), dtype=torch.int8)
+    for c in range(6):
+        net[c] *= c
     
-    # center
-    (
-        net[F00, *FP11], net[F01, *FP11], net[F02, *FP11],
-        net[F03, *FP11], net[F04, *FP11], net[F05, *FP11],
-    ) = tuple(range(6))
-    
-    # conner
-    _state_to_net_corner(state, net, override_map_corner)
-    
-    # edge
+    _state_to_net_corner(state, net)
     _state_to_net_edge(state, net)
 
     return net
@@ -139,29 +132,25 @@ TWIST_SUBCUBE_MAP = {
     C07: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
 }
 
-def _state_to_net_corner(state: State, net: torch.Tensor, override_map: list[tuple[int]] = None) -> None:
-    subcube_map = TWIST_SUBCUBE_MAP if override_map is None else override_map
+def _state_to_net_corner(state: State, net: torch.Tensor) -> None:
 
     twists = state.twist_co  # ← ピースID基準のねじれ(0,1,2)
 
-    for pos in range(8):  # 位置ID
-        pid = int(state.corner_positions[pos])  # ← この位置にいる「ピースID」
+    for position in range(8):  # 位置ID
+        corner_id = int(state.corner_positions[position])
+        twist = int(twists[corner_id])
 
-        # 位置posに対応する面と、ネット上の3マス（コーナーは3色）
-        cf  = CORNER_FACES[pos]
-        cfp = CORNER_SUBCUBES[pos]
+        destination_colors = CORNER_FACES[position]
+        source_colors = CORNER_FACES[corner_id]
 
-        # そのピースが持つ3面の色と、ねじれ
-        sc  = CORNER_FACES[pid]
-        tw  = int(twists[pid])
+        destination_position = CORNER_SUBCUBES[position]
+        source_position = CORNER_SUBCUBES[corner_id]
 
-        # ピースID×ねじれで割り当て順を決める
-        tsm = subcube_map[pid][tw]
+        net[destination_colors[0], *destination_position[0]] = source_colors[0]
+        net[destination_colors[1], *destination_position[1]] = source_colors[1]
+        net[destination_colors[2], *destination_position[2]] = source_colors[2]
 
-        net[cf[0], *cfp[0]] = sc[tsm[0]]
-        net[cf[1], *cfp[1]] = sc[tsm[1]]
-        net[cf[2], *cfp[2]] = sc[tsm[2]]
-    
+
 FLIP_SUBCUBE_MAP = {
     E00: [(0, 1), (0, 1)],
     E01: [(0, 1), (0, 1)],
@@ -177,24 +166,23 @@ FLIP_SUBCUBE_MAP = {
     E11: [(0, 1), (0, 1)],   
 }
 
-def _state_to_net_edge(state: State, net: torch.Tensor, override_map: list[tuple[int]] = None) -> None:
-    subcube_map = FLIP_SUBCUBE_MAP if override_map is None else override_map
+def _state_to_net_edge(state: State, net: torch.Tensor) -> None:
+    subcube_map = FLIP_SUBCUBE_MAP
 
     flips = state.twist_eo  # ← ピースID基準 (0/1)
 
-    for pos in range(12):  # 位置ID
-        pid = int(state.edge_positions[pos])  # この位置にいる「エッジのピースID」
+    for position in range(12):
+        edge_id = int(state.edge_positions[position])
 
-        ef  = EDGE_FACES[pos]
-        efp = EDGE_SUBCUBES[pos]
+        flip = int(flips[edge_id])
+        destination_colors = EDGE_FACES[position]
+        source_colors = EDGE_FACES[edge_id]
+        destination_position = EDGE_SUBCUBES[position]
+        source_position = EDGE_SUBCUBES[edge_id]
 
-        sc  = EDGE_FACES[pid]   # そのピースが持つ2色
-        fl  = int(flips[pid])   # そのピースの反転
+        net[destination_colors[0], *destination_position[0]] = source_colors[0]
+        net[destination_colors[1], *destination_position[1]] = source_colors[1]
 
-        tsm = subcube_map[pid][fl]
-
-        net[ef[0], *efp[0]] = sc[tsm[0]]
-        net[ef[1], *efp[1]] = sc[tsm[1]]
 
 def print_net(net:torch.Tensor):
     net_for_print = f"""
