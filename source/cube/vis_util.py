@@ -216,7 +216,7 @@ def print_net(net:torch.Tensor):
 if __name__ == "__main__":
     from state import MOVES as moves
     
-    old_map_corner =  {
+    old_map_corner = {
         C00: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
         C01: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
         C02: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
@@ -238,10 +238,13 @@ if __name__ == "__main__":
     f = moves['F']
     b = moves['B']
 
+    print("r @ l")
     print(r @ l)
     pn(stn(r @ l))
+    print("u @ d")
     print(u @ d)
     pn(stn(u @ d))
+    print("f @ b")
     print(f @ b)
     pn(stn(f @ b))
 
