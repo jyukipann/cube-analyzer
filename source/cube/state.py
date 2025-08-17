@@ -153,10 +153,10 @@ class State:
         o = self.corner_orientations
 
         o = torch.stack([
-            # cos(a+b) = cos(a)cos(b) + sin(a)sin(b)
-            o[:, 0] * so[:, 0] + o[:, 1] * so[:, 1],
-            # sin(a+b) = sin(a)cos(b) - cos(a)sin(b)
-            o[:, 1] * so[:, 0] - o[:, 0] * so[:, 1],
+            # cos(a+b) = cos(a)cos(b) - sin(a)sin(b)
+            o[:, 0] * so[:, 0] - o[:, 1] * so[:, 1],
+            # sin(a+b) = sin(a)cos(b) + cos(a)sin(b)
+            o[:, 1] * so[:, 0] + o[:, 0] * so[:, 1],
         ], dim=1)
         return (p, o)
     
