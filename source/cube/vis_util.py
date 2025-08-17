@@ -64,9 +64,9 @@ CORNER_FACES_POSITIONS = [
         (B, FP00,),
     ], # 1
     [
-        (R, FP00,),
         (F, FP02,),
         (U, FP22,),
+        (R, FP00,),
     ], # 2
     [
         (L, FP02,),
@@ -79,9 +79,9 @@ CORNER_FACES_POSITIONS = [
         (B, FP22,),
     ], # 4
     [
-        (R, FP22,),
-        (D, FP22,),
         (B, FP20,),
+        (D, FP22,),
+        (R, FP22,),
     ], # 5
     [
         (R, FP20,),
@@ -268,6 +268,7 @@ def print_net(net:torch.Tensor):
         4---□---5
     """
     print(net_for_print.replace("9", " "))
+    return net_for_print
 
 if __name__ == "__main__":
     from state import MOVES as moves
@@ -294,19 +295,49 @@ if __name__ == "__main__":
     f = moves['F']
     b = moves['B']
 
-    print("r @ l")
-    print(r @ l)
-    pn(stn(r @ l))
-    print("u @ d")
-    print(u @ d)
-    pn(stn(u @ d))
-    print("f @ b")
-    print(f @ b)
-    pn(stn(f @ b))
+    # print("r @ l")
+    # print(r @ l)
+    # pn(stn(r @ l))
+    # print("u @ d")
+    # print(u @ d)
+    # pn(stn(u @ d))
+    # print("f @ b")
+    # print(f @ b)
+    # pn(stn(f @ b))
 
-    print(torch.all(stn(r@l) == stn(r@l, old_map_corner)))
-    print(torch.all(stn(~(r@l)) == stn(~(r@l), old_map_corner)))
-    print(torch.all(stn(f@b) == stn(f@b, old_map_corner)))
-    print(torch.all(stn(~(f@b)) == stn(~(f@b), old_map_corner)))
-    print(torch.all(stn(u@d) == stn(u@d, old_map_corner)))
-    print(torch.all(stn(~(u@d)) == stn(~(u@d), old_map_corner)))
+    print('s')
+    s_net_string = pn(stn(State()))
+    print('r')
+    print(r)
+    r_net_string = pn(stn(r))
+    assert r_net_string == """
+        0---★---1
+        | 4 4 0 |
+        ○ 4 4 0 ●
+        | 4 4 0 |
+0---○---3-------2---●---1---★---0
+| 2 2 2 | 0 0 5 | 1 1 1 | 4 3 3 |
+■ 2 2 2 | 0 0 5 | 1 1 1 | 4 3 3 ■
+| 2 2 2 | 0 0 5 | 1 1 1 | 4 3 3 |
+4---●---7-------6---○---5---□---4
+        | 5 5 3 |
+        ● 5 5 3 ○
+        | 5 5 3 |
+        4---□---5
+    """
+    print('l')
+    print(l)
+    l_net_string = pn(stn(l))
+    
+    # print('u')
+    # print(u)
+    # pn(stn(u))
+    # print('d')
+    # print(d)
+    # pn(stn(d))
+    # print('f')
+    # print(f)
+    # pn(stn(f))
+    # print('b')
+    # print(b)
+    # pn(stn(b))
