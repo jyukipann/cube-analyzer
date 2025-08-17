@@ -327,8 +327,9 @@ if __name__ == "__main__":
     s = State()
     r = MOVES['R']
     
-    print(r @ (~r) == State())
-    print(s @ r == r)
+    print(r @ (~r) == s) 
+    print(s @ r == r) 
+    print(r @ s == r)
     
     # print(r @ r)
     # print(r @ r @ r)
@@ -337,6 +338,7 @@ if __name__ == "__main__":
     # print(~r)
     # print(~r @ r)
     # print(s == ~r @ r)
+    # print(r @ l @ (~r) @ (~l) == s)
     
     # print(s == ~(MOVES['U'] @ MOVES['D']) @ MOVES['U'] @ MOVES['D'])
     # print(s == ~(MOVES['R'] @ MOVES['L']) @ MOVES['R'] @ MOVES['L'])
