@@ -146,9 +146,9 @@ def _state_to_net_corner(state: State, net: torch.Tensor) -> None:
         destination_position = CORNER_SUBCUBES[position]
         source_position = CORNER_SUBCUBES[corner_id]
 
-        net[destination_colors[0], *destination_position[0]] = source_colors[0]
-        net[destination_colors[1], *destination_position[1]] = source_colors[1]
-        net[destination_colors[2], *destination_position[2]] = source_colors[2]
+        net[destination_colors[0], *destination_position[0]] = source_colors[(0+twist)%3]
+        net[destination_colors[1], *destination_position[1]] = source_colors[(1+twist)%3]
+        net[destination_colors[2], *destination_position[2]] = source_colors[(2+twist)%3]
 
 
 FLIP_SUBCUBE_MAP = {
@@ -179,9 +179,10 @@ def _state_to_net_edge(state: State, net: torch.Tensor) -> None:
         source_colors = EDGE_FACES[edge_id]
         destination_position = EDGE_SUBCUBES[position]
         source_position = EDGE_SUBCUBES[edge_id]
+        
+        net[destination_colors[0], *destination_position[0]] = source_colors[0+flip]
+        net[destination_colors[1], *destination_position[1]] = source_colors[1-flip]
 
-        net[destination_colors[0], *destination_position[0]] = source_colors[0]
-        net[destination_colors[1], *destination_position[1]] = source_colors[1]
 
 
 def print_net(net:torch.Tensor):
