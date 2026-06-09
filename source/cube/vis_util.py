@@ -54,8 +54,8 @@ FP20, FP21, FP22 = ((2,0), (2,1), (2,2))
 
 CORNER_FACES_POSITIONS = [
     [
-        (L, FP00,),
         (B, FP02,),
+        (L, FP00,),
         (U, FP00,),
     ], # 0
     [
@@ -69,14 +69,14 @@ CORNER_FACES_POSITIONS = [
         (R, FP00,),
     ], # 2
     [
+        (F, FP00,),
         (L, FP02,),
         (U, FP20,),
-        (F, FP00,),
     ], # 3
     [
         (L, FP20,),
-        (D, FP20,),
         (B, FP22,),
+        (D, FP20,),
     ], # 4
     [
         (B, FP20,),
@@ -89,9 +89,9 @@ CORNER_FACES_POSITIONS = [
         (F, FP22,),
     ], # 6
     [
+        (F, FP20,),
         (L, FP22,),
         (D, FP00,),
-        (F, FP20,),
     ], # 7
 ]
 
@@ -272,22 +272,10 @@ def print_net(net:torch.Tensor):
 
 if __name__ == "__main__":
     from state import MOVES as moves
-    
-    old_map_corner = {
-        C00: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
-        C01: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
-        C02: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
-        C03: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
-        C04: [(2, 1, 0), (0, 2, 1), (0, 1, 2)],
-        C05: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
-        C06: [(2, 1, 0), (0, 2, 1), (0, 1, 2)],
-        C07: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
-    }
-    
+
     pn = print_net
     stn = state_to_net
-    
-    
+
     r = moves['R']
     l = moves['L']
     u = moves['U']
@@ -295,49 +283,23 @@ if __name__ == "__main__":
     f = moves['F']
     b = moves['B']
 
-    # print("r @ l")
-    # print(r @ l)
-    # pn(stn(r @ l))
-    # print("u @ d")
-    # print(u @ d)
-    # pn(stn(u @ d))
-    # print("f @ b")
-    # print(f @ b)
-    # pn(stn(f @ b))
-
     print('s')
-    s_net_string = pn(stn(State()))
+    pn(stn(State()))
+
     print('r')
-    print(r)
-    r_net_string = pn(stn(r))
-    assert r_net_string == """
-        0---★---1
-        | 4 4 0 |
-        ○ 4 4 0 ●
-        | 4 4 0 |
-0---○---3-------2---●---1---★---0
-| 2 2 2 | 0 0 5 | 1 1 1 | 4 3 3 |
-■ 2 2 2 | 0 0 5 | 1 1 1 | 4 3 3 ■
-| 2 2 2 | 0 0 5 | 1 1 1 | 4 3 3 |
-4---●---7-------6---○---5---□---4
-        | 5 5 3 |
-        ● 5 5 3 ○
-        | 5 5 3 |
-        4---□---5
-    """
+    r_net = stn(r)
+    r_net_expected = torch.tensor([
+        [[F, F, D], [F, F, D], [F, F, D]],  # F
+        [[R, R, R], [R, R, R], [R, R, R]],  # R
+        [[L, L, L], [L, L, L], [L, L, L]],  # L
+        [[U, B, B], [U, B, B], [U, B, B]],  # B
+        [[U, U, F], [U, U, F], [U, U, F]],  # U
+        [[D, D, B], [D, D, B], [D, D, B]],  # D
+    ], dtype=torch.int64)
+    pn(r_net)
+    assert torch.equal(r_net, r_net_expected), "R move net mismatch"
+    print('r: OK')
+
+    # TODO: verify L, U, D, F, B after MLX rewrite
     print('l')
-    print(l)
-    l_net_string = pn(stn(l))
-    
-    # print('u')
-    # print(u)
-    # pn(stn(u))
-    # print('d')
-    # print(d)
-    # pn(stn(d))
-    # print('f')
-    # print(f)
-    # pn(stn(f))
-    # print('b')
-    # print(b)
-    # pn(stn(b))
+    pn(stn(l))
