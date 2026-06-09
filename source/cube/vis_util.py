@@ -52,115 +52,204 @@ FP00, FP01, FP02 = ((0,0), (0,1), (0,2))
 FP10, FP11, FP12 = ((1,0), (1,1), (1,2))
 FP20, FP21, FP22 = ((2,0), (2,1), (2,2))
 
-# それぞれの面に対して、角と辺の位置を入れていく
-# 角と面の向きの関係
-# その場所にあるサブキューブの向きが入る
-# Xから始まり、反時計回りに入れていく
-CORNER_FACES = torch.tensor([
-    [L, B, U,], # 0
-    [R, U, B,], # 1
-    [R, F, U,], # 2
-    [L, U, F,], # 3
-    [L, D, B,], # 4
-    [R, D, B,], # 5
-    [R, D, F,], # 6
-    [L, D, F,], # 7
-], dtype=torch.int64)
+CORNER_FACES_POSITIONS = [
+    [
+        (B, FP02,),
+        (L, FP00,),
+        (U, FP00,),
+    ], # 0
+    [
+        (R, FP02,),
+        (U, FP02,),
+        (B, FP00,),
+    ], # 1
+    [
+        (F, FP02,),
+        (U, FP22,),
+        (R, FP00,),
+    ], # 2
+    [
+        (F, FP00,),
+        (L, FP02,),
+        (U, FP20,),
+    ], # 3
+    [
+        (L, FP20,),
+        (B, FP22,),
+        (D, FP20,),
+    ], # 4
+    [
+        (B, FP20,),
+        (D, FP22,),
+        (R, FP22,),
+    ], # 5
+    [
+        (R, FP20,),
+        (D, FP02,),
+        (F, FP22,),
+    ], # 6
+    [
+        (F, FP20,),
+        (L, FP22,),
+        (D, FP00,),
+    ], # 7
+]
+
+CORNER_FACES = torch.tensor(
+    [
+        [c for c, _ in color_positions] for color_positions in CORNER_FACES_POSITIONS
+    ], 
+    dtype=torch.int64
+)
 
 # F00, F02, F20, F22のどれか
-CORNER_SUBCUBES = torch.tensor([
-    [FP00, FP02, FP00,], # 0
-    [FP02, FP02, FP00,], # 1
-    [FP00, FP02, FP22,], # 2
-    [FP02, FP20, FP00,], # 3
-    [FP20, FP20, FP22,], # 4
-    [FP22, FP22, FP20,], # 5
-    [FP20, FP02, FP22,], # 6
-    [FP22, FP00, FP20,], # 7
-], dtype=torch.int64)
+CORNER_SUBCUBES = torch.tensor(
+    [
+        [p for _, p in color_positions] for color_positions in CORNER_FACES_POSITIONS
+    ], 
+    dtype=torch.int64
+)
 
-EDGE_FACES = torch.tensor([
-    [L, B,], # E00
-    [R, B,], # E01
-    [R, F,], # E02
-    [L, F,], # E03
-    [U, B,], # E04
-    [R, U,], # E05
-    [U, F,], # E06
-    [L, U,], # E07
-    [D, B,], # E08
-    [R, D,], # E09
-    [D, F,], # E10
-    [L, D,], # E11
-], dtype=torch.int64)
+EDGE_FACES_POSITIONS = [
+    [
+        (L, FP10,),
+        (B, FP12,),
+    ], # E00
+    [
+        (R, FP12,),
+        (B, FP10,),
+    ], # E01
+    [
+        (R, FP10,),
+        (F, FP12,),
+    ], # E02
+    [
+        (L, FP12,),
+        (F, FP10,),
+    ], # E03
+    [
+        (U, FP01,),
+        (B, FP01,),
+    ], # E04
+    [
+        (R, FP01,),
+        (U, FP12,),
+    ], # E05
+    [
+        (U, FP21,),
+        (F, FP01,),
+    ], # E06
+    [
+        (L, FP01,),
+        (U, FP10,),
+    ], # E07
+    [
+        (D, FP21,),
+        (B, FP21,),
+    ], # E08
+    [
+        (R, FP21,),
+        (D, FP12,),
+    ], # E09
+    [
+        (D, FP01,),
+        (F, FP21,),
+    ], # E10
+    [
+        (L, FP21,),
+        (D, FP10,),
+    ], # E11
+]
 
-EDGE_SUBCUBES = torch.tensor([
-    [FP10, FP12,], # E00
-    [FP12, FP10,], # E01
-    [FP10, FP12,], # E02
-    [FP12, FP10,], # E03
-    [FP01, FP01,], # E04
-    [FP01, FP12,], # E05
-    [FP21, FP01,], # E06
-    [FP01, FP10,], # E07
-    [FP21, FP21,], # E08
-    [FP21, FP12,], # E09
-    [FP01, FP21,], # E10
-    [FP21, FP10,], # E11
-], dtype=torch.int64)
+EDGE_FACES = torch.tensor(
+    [
+        [c for c, _ in color_positions] for color_positions in EDGE_FACES_POSITIONS
+    ],
+    dtype=torch.int64
+)
+
+EDGE_SUBCUBES = torch.tensor(
+    [
+        [p for _, p in color_positions] for color_positions in EDGE_FACES_POSITIONS
+    ], 
+    dtype=torch.int64
+)
 
 
 def state_to_net(state: State)->torch.Tensor:
-    net = torch.zeros((6, 3, 3), dtype=torch.int8)+9
+    net = torch.ones((6, 3, 3), dtype=torch.int8)
+    for c in range(6):
+        net[c] *= c
     
-    # center
-    (
-        net[F00, *FP11], net[F01, *FP11], net[F02, *FP11],
-        net[F03, *FP11], net[F04, *FP11], net[F05, *FP11],
-    ) = tuple(range(6))
-    
-    # conner
-    slicer_cp = state.corner_positions.to(torch.int64)
-    corner_faces = CORNER_FACES[slicer_cp] # 入れ替え後のsubcubeの色のリスト
-    corner_twists = state.twist_co
-    corner_subcube_positions = CORNER_SUBCUBES
-    for CF, csf, cf, tw in zip(
-            CORNER_FACES, corner_subcube_positions, corner_faces, corner_twists):
-        
-        # subcubeの位置に値を入れる
-        # X軸は注意 R L 
-        if CF[0] == R or CF[0] == L:
-            print("X軸")
-            if tw == 0:
-                print("tw == 0")
-                net[CF[0], *csf[0]] = cf[0]
-                net[CF[1], *csf[1]] = cf[1]
-                net[CF[2], *csf[2]] = cf[2]
-            else:
-                net[CF[0], *csf[0]] = cf[0]
-                net[CF[1], *csf[1]], net[CF[2], *csf[2]] = (
-                    (cf[1], cf[2]) if tw == 1 else (cf[2], cf[1]))
-        else:
-            net[CF[0], *csf[0]] = cf[(0 + tw) % 3]
-            net[CF[1], *csf[1]] = cf[(1 + tw) % 3]
-            net[CF[2], *csf[2]] = cf[(2 + tw) % 3]
-        
-
-    # edge
-    slicer_ep = state.edge_positions.to(torch.int64)
-    edge_faces = EDGE_FACES[slicer_ep]
-    edge_twists = state.twist_eo
-    edge_subcube_positions = EDGE_SUBCUBES
-    for i in range(12):
-        # subcubeフリップ
-        is_flipped = edge_twists[i]
-        # subcubeの位置に値を入れる
-        net[EDGE_FACES[i, 0], *edge_subcube_positions[i, 0]] = edge_faces[i][is_flipped]
-        net[EDGE_FACES[i, 1], *edge_subcube_positions[i, 1]] = edge_faces[i][(is_flipped+1)%2]
-    
-    print_net(net)
+    _state_to_net_corner(state, net)
+    _state_to_net_edge(state, net)
 
     return net
+
+# twistとsubecubeの展開の対応関係
+TWIST_SUBCUBE_MAP = {
+    C00: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
+    C01: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
+    C02: [(2, 0, 1), (0, 1, 2), (0, 1, 2)],
+    C03: [(1, 2, 0), (0, 1, 2), (0, 2, 1)],
+    C04: [(2, 1, 0), (0, 2, 1), (0, 1, 2)],
+    C05: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
+    C06: [(2, 1, 0), (0, 2, 1), (0, 1, 2)],
+    C07: [(2, 1, 0), (0, 2, 1), (0, 2, 1)],
+}
+
+def _state_to_net_corner(state: State, net: torch.Tensor) -> None:
+
+    twists = state.twist_co  # ← ピースID基準のねじれ(0,1,2)
+
+    for position in range(8):  # 位置ID
+        corner_id = int(state.corner_positions[position])
+        twist = int(twists[corner_id])
+
+        destination_colors = CORNER_FACES[position]
+        source_colors = CORNER_FACES[corner_id]
+
+        destination_position = CORNER_SUBCUBES[position]
+        source_position = CORNER_SUBCUBES[corner_id]
+
+        net[destination_colors[0], *destination_position[0]] = source_colors[(0+twist)%3]
+        net[destination_colors[1], *destination_position[1]] = source_colors[(1+twist)%3]
+        net[destination_colors[2], *destination_position[2]] = source_colors[(2+twist)%3]
+
+
+FLIP_SUBCUBE_MAP = {
+    E00: [(0, 1), (0, 1)],
+    E01: [(0, 1), (0, 1)],
+    E02: [(0, 1), (0, 1)],
+    E03: [(0, 1), (0, 1)],
+    E04: [(0, 1), (0, 1)],
+    E05: [(0, 1), (0, 1)],
+    E06: [(0, 1), (0, 1)],
+    E07: [(0, 1), (0, 1)],
+    E08: [(0, 1), (0, 1)],
+    E09: [(0, 1), (0, 1)],
+    E10: [(0, 1), (0, 1)],
+    E11: [(0, 1), (0, 1)],   
+}
+
+def _state_to_net_edge(state: State, net: torch.Tensor) -> None:
+    subcube_map = FLIP_SUBCUBE_MAP
+
+    flips = state.twist_eo  # ← ピースID基準 (0/1)
+
+    for position in range(12):
+        edge_id = int(state.edge_positions[position])
+
+        flip = int(flips[edge_id])
+        destination_colors = EDGE_FACES[position]
+        source_colors = EDGE_FACES[edge_id]
+        destination_position = EDGE_SUBCUBES[position]
+        source_position = EDGE_SUBCUBES[edge_id]
+        
+        net[destination_colors[0], *destination_position[0]] = source_colors[0+flip]
+        net[destination_colors[1], *destination_position[1]] = source_colors[1-flip]
+
+
 
 def print_net(net:torch.Tensor):
     net_for_print = f"""
@@ -179,25 +268,38 @@ def print_net(net:torch.Tensor):
         4---□---5
     """
     print(net_for_print.replace("9", " "))
+    return net_for_print
 
 if __name__ == "__main__":
     from state import MOVES as moves
-    
-    # state_to_net(State())
-    # print(moves['R'])
-    # r = State(
-    #     corner_positions=moves['R'].corner_positions,
-    #     corner_orientations=[0, 0, 0, 0, 0, 0, 0, 0],
-    #     edge_positions=moves['R'].edge_positions,
-    #     edge_orientations=moves['R'].edge_orientations,
-    # )
+
+    pn = print_net
+    stn = state_to_net
+
     r = moves['R']
-    print(r)
-    state_to_net(r)
-    # state_to_net(moves['R'])
-    # state_to_net(moves['R'] @ moves['R'])
-    # state_to_net(moves['U'])
-    # print(State())
-    # state_to_net(moves['U'])
-    # state_to_net(moves['L'])
-    
+    l = moves['L']
+    u = moves['U']
+    d = moves['D']
+    f = moves['F']
+    b = moves['B']
+
+    print('s')
+    pn(stn(State()))
+
+    print('r')
+    r_net = stn(r)
+    r_net_expected = torch.tensor([
+        [[F, F, D], [F, F, D], [F, F, D]],  # F
+        [[R, R, R], [R, R, R], [R, R, R]],  # R
+        [[L, L, L], [L, L, L], [L, L, L]],  # L
+        [[U, B, B], [U, B, B], [U, B, B]],  # B
+        [[U, U, F], [U, U, F], [U, U, F]],  # U
+        [[D, D, B], [D, D, B], [D, D, B]],  # D
+    ], dtype=torch.int64)
+    pn(r_net)
+    assert torch.equal(r_net, r_net_expected), "R move net mismatch"
+    print('r: OK')
+
+    # TODO: verify L, U, D, F, B after MLX rewrite
+    print('l')
+    pn(stn(l))
