@@ -12,23 +12,32 @@ Training starts with random scrambles; later a CFOP-restricted variant (OLL/PLL)
 
 ## Environment
 
-Python 3.12, venv at `cubea/`.
+Python 3.12, managed with [`uv`](https://docs.astral.sh/uv/). Dependencies are
+declared in `pyproject.toml` (runtime: `mlx`; dev: `pytest`, `pytest-xdist`).
 
 ```bash
-source cubea/bin/activate
-pip install -r requirements.txt   # torch, torchvision, torchaudio (→ will migrate to mlx)
+uv sync                       # create .venv and install deps + dev group
 ```
 
-macOS Apple Silicon. Current code uses PyTorch MPS; migration to MLX is planned.
+macOS Apple Silicon. Backend is **MLX** (the old PyTorch/MPS code has been
+fully migrated). No GitHub Actions yet — a self-hosted runner is planned, so do
+not add GHA workflows.
 
 ## Running Code
 
-No formal test runner. Each module has a `__main__` block for verification:
+Tests use `pytest` (validated against an independent facelet oracle):
+
+```bash
+uv run pytest            # full suite
+uv run pytest -n auto    # parallel (pytest-xdist)
+```
+
+Each module also has a `__main__` block for quick manual checks:
 
 ```bash
 cd source/cube
-python state.py      # group algebra checks (composition, inversion, multiplication)
-python vis_util.py   # net rendering and move correctness assertions
+uv run python state.py      # identity / inverse / order-4 checks for all moves
+uv run python vis_util.py   # prints the net for solved + all 6 quarter turns
 ```
 
 ## Repository Layout (Planned)
@@ -89,7 +98,14 @@ Group operators:
       D
 ```
 
-Constants: `CORNER_FACES_POSITIONS`, `EDGE_FACES_POSITIONS` define which face cells each corner/edge piece occupies. `TWIST_SUBCUBE_MAP` and `FLIP_SUBCUBE_MAP` determine sticker permutation under twist/flip.
+Constants `CORNER_FACES_POSITIONS` / `EDGE_FACES_POSITIONS` list, for each slot, the `(face, cell)` of every sticker in a **canonical CCW-from-outside order**. Because that order has uniform chirality across all slots, twist/flip render with a single cyclic-offset formula (no per-piece special-casing):
+
+```
+corner: net[slot.faces[(k + twist) % 3]] = piece.colors[k]
+edge:   net[slot.faces[(k + flip)  % 2]] = piece.colors[k]
+```
+
+`tests/oracle.py` is an independent 3D facelet model (rotates the 54 stickers directly); `tests/test_vis_util.py` checks `state_to_net` against it for all moves and random scrambles. The `MOVES` tables and these canonical orders were derived from that geometry.
 
 3D visualization (Python side) is planned — likely matplotlib or a dedicated 3D library.
 
