@@ -1,7 +1,8 @@
 """Evaluation harness for trained CubeSolver models.
 
-Runs a trained model on a batch of scrambled cubes via greedy rollout and
-measures how often it actually reaches the solved state.
+Runs a trained model on a batch of scrambled cubes via greedy rollout or
+beam-search rollout, and measures how often it actually reaches the solved
+state.
 
 Usage
 -----
@@ -10,9 +11,13 @@ Usage
         --ckpt runs/bc/latest.npz \\
         --ckpt runs/diffusion/latest.npz \\
         --baseline --n 200 --scramble-depth 25
+    uv run python source/infer.py \\
+        --ckpt runs/diffusion/latest.npz \\
+        --n 100 --scramble-depth 8 --beam 8
 """
 
 import argparse
+import math
 import random
 import statistics
 import sys
@@ -146,6 +151,152 @@ def rollout(
 
 
 # ---------------------------------------------------------------------------
+# Beam-search rollout
+# ---------------------------------------------------------------------------
+
+def rollout_beam(
+    model: CubeSolver,
+    scrambles: list[tuple],
+    scramble_depth: int,
+    max_steps: int,
+    beam_width: int,
+) -> tuple[list[bool], list[int]]:
+    """Beam-search model rollout for a batch of scrambled cubes.
+
+    Parameters
+    ----------
+    model         : loaded CubeSolver
+    scrambles     : list of N scrambled state tuples (cp,ct,ep,ef)
+    scramble_depth: used to set the initial t value (noise level counts down)
+    max_steps     : maximum number of steps to attempt
+    beam_width    : number of candidates to keep per scramble per step
+
+    Returns
+    -------
+    solved_mask : list[bool] of length N, True if the cube was solved
+    steps       : list[int], solved_step (1-indexed) or max_steps if unsolved
+
+    Notes
+    -----
+    Each scramble maintains an independent beam of up to `beam_width`
+    (state, cumulative_logprob) candidates.  At each step we batch ALL live
+    candidates across ALL unsolved scrambles into a single model forward pass,
+    convert logits to log-probabilities, expand by the top-`beam_width` moves,
+    and keep the top-`beam_width` children per scramble ranked by cumulative
+    log-probability.  If any candidate is solved we record that scramble as
+    done and stop expanding it.
+    """
+    n = len(scrambles)
+
+    # Each scramble starts with a beam of one candidate: (state, logprob=0.0)
+    # beams[i] = list of (state_tuple, cumulative_logprob)
+    beams: list[list[tuple[tuple, float]]] = [
+        [(s, 0.0)] for s in scrambles
+    ]
+
+    solved_step = [-1] * n  # -1 = unsolved so far
+
+    # Goal arrays are fixed (all identity) — we build once and reindex per batch
+    goal_state = _IDENTITY
+
+    for step in range(max_steps):
+        # Indices of scrambles still being searched
+        active = [i for i in range(n) if solved_step[i] == -1]
+        if not active:
+            break
+
+        # Build the flat batch of ALL live candidates across active scrambles.
+        # candidate_owner[k] = which scramble index owns the k-th candidate.
+        candidate_states: list[tuple] = []
+        candidate_owner: list[int] = []
+        for i in active:
+            for state, _lp in beams[i]:
+                candidate_states.append(state)
+                candidate_owner.append(i)
+
+        batch_size = len(candidate_states)
+
+        # Build MLX arrays for the whole batch
+        curr_cp, curr_ct, curr_ep, curr_ef = states_to_arrays(candidate_states)
+        goal_cp, goal_ct, goal_ep, goal_ef = states_to_arrays(
+            [goal_state] * batch_size
+        )
+
+        t_val = max(1, scramble_depth - step)
+        t = mx.array([t_val] * batch_size, dtype=mx.int32)
+
+        logits = model(
+            goal=(goal_cp, goal_ct, goal_ep, goal_ef),
+            curr=(curr_cp, curr_ct, curr_ep, curr_ef),
+            t=t,
+        )
+        mx.eval(logits)
+
+        # Convert logits -> log-probabilities via logsumexp (numerically stable)
+        # logsumexp per row: shape [batch_size]
+        log_z = mx.log(mx.sum(mx.exp(logits - mx.max(logits, axis=1, keepdims=True)), axis=1, keepdims=True)) + mx.max(logits, axis=1, keepdims=True)
+        log_probs = logits - log_z          # shape [batch_size, 18]
+        mx.eval(log_probs)
+        log_probs_list = log_probs.tolist()  # list of list[float] len batch_size x 18
+
+        # Map each candidate row back to (scramble_index, candidate_index_in_beam)
+        # We need to know the parent's cumulative logprob; rebuild a lookup.
+        # candidate_lp[k] = cumulative logprob of the k-th candidate in the batch
+        candidate_lp: list[float] = []
+        for i in active:
+            for _state, lp in beams[i]:
+                candidate_lp.append(lp)
+
+        # Expand: for each scramble collect all (child_state, child_logprob) pairs,
+        # keep top beam_width by child_logprob.
+        # Group rows by scramble index.
+        scramble_rows: dict[int, list[int]] = {i: [] for i in active}
+        for k, i in enumerate(candidate_owner):
+            scramble_rows[i].append(k)
+
+        new_beams: dict[int, list[tuple[tuple, float]]] = {}
+        for i in active:
+            rows = scramble_rows[i]
+            # Collect up to beam_width expansions per parent row, then take
+            # global top beam_width across all parents for this scramble.
+            children: list[tuple[float, tuple]] = []
+            for k in rows:
+                parent_lp = candidate_lp[k]
+                parent_state = candidate_states[k]
+                row_log_probs = log_probs_list[k]  # 18 floats
+
+                # Sort moves by logprob descending; only expand top beam_width
+                # to bound cost while staying correct (top-beam_width suffices
+                # because any lower-ranked move would produce a lower-prob child).
+                sorted_moves = sorted(
+                    range(18), key=lambda m: row_log_probs[m], reverse=True
+                )[:beam_width]
+
+                for move_idx in sorted_moves:
+                    child_state = _compose(parent_state, _MOVES_PY[move_idx])
+                    child_lp = parent_lp + row_log_probs[move_idx]
+                    children.append((child_lp, child_state))
+
+            # Keep top beam_width children; break ties arbitrarily
+            children.sort(key=lambda x: x[0], reverse=True)
+            children = children[:beam_width]
+
+            new_beams[i] = [(st, lp) for lp, st in children]
+
+        # Check for solved states; commit new beams
+        for i in active:
+            for state, lp in new_beams[i]:
+                if cube_solved(state):
+                    solved_step[i] = step + 1  # 1-indexed
+                    break
+            beams[i] = new_beams[i]
+
+    solved_mask = [solved_step[i] != -1 for i in range(n)]
+    steps = [solved_step[i] if solved_step[i] != -1 else max_steps for i in range(n)]
+    return solved_mask, steps
+
+
+# ---------------------------------------------------------------------------
 # Scramble generation (fixed-seed for reproducibility)
 # ---------------------------------------------------------------------------
 
@@ -171,6 +322,7 @@ def evaluate(
     scramble_depth: int = 25,
     max_steps: int | None = None,
     seed: int = 0,
+    beam_width: int = 0,
     **model_cfg,
 ) -> dict:
     """Evaluate a checkpoint on n scrambles.
@@ -182,12 +334,13 @@ def evaluate(
     scramble_depth: depth of each scramble
     max_steps     : maximum rollout steps (default: scramble_depth * 4)
     seed          : random seed for scramble generation
+    beam_width    : if > 0, use beam search with this width; 0 = greedy
     **model_cfg   : forwarded to load_model (d_model, n_layers, etc.)
 
     Returns
     -------
     dict with keys: success_rate, n_solved, n, avg_steps_solved,
-                    median_steps_solved, scramble_depth, max_steps
+                    median_steps_solved, scramble_depth, max_steps, beam_width
     """
     if max_steps is None or max_steps <= 0:
         max_steps = scramble_depth * 4
@@ -195,7 +348,12 @@ def evaluate(
     model = load_model(ckpt_path, **model_cfg)
     scrambles = _generate_scrambles(n, scramble_depth, seed=seed)
 
-    solved_mask, steps = rollout(model, scrambles, scramble_depth, max_steps)
+    if beam_width > 0:
+        solved_mask, steps = rollout_beam(
+            model, scrambles, scramble_depth, max_steps, beam_width
+        )
+    else:
+        solved_mask, steps = rollout(model, scrambles, scramble_depth, max_steps)
 
     n_solved = sum(solved_mask)
     success_rate = n_solved / n
@@ -212,6 +370,7 @@ def evaluate(
         "median_steps_solved": median_steps,
         "scramble_depth": scramble_depth,
         "max_steps": max_steps,
+        "beam_width": beam_width,
     }
 
 
@@ -323,6 +482,13 @@ def main() -> None:
         action="store_true",
         help="Also run the CFOP baseline on the same scrambles.",
     )
+    parser.add_argument(
+        "--beam",
+        type=int,
+        default=0,
+        metavar="WIDTH",
+        help="Beam width for beam-search rollout (0 = greedy, default).",
+    )
     # Model architecture args (for non-default checkpoints)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--n-layers", type=int, default=4)
@@ -343,15 +509,18 @@ def main() -> None:
         t_max=args.t_max,
     )
 
+    beam_mode = args.beam > 0
     print(
         f"Evaluating: n={args.n}, scramble_depth={args.scramble_depth}, "
         f"max_steps={effective_max}, seed={args.seed}"
+        + (f", beam_width={args.beam}" if beam_mode else "")
     )
 
     rows = []
 
     if args.ckpts:
         for ckpt_path in args.ckpts:
+            label = f"{ckpt_path} (beam={args.beam})" if beam_mode else ckpt_path
             print(f"  loading {ckpt_path} ...", flush=True)
             result = evaluate(
                 ckpt_path,
@@ -359,11 +528,12 @@ def main() -> None:
                 scramble_depth=args.scramble_depth,
                 max_steps=max_steps,
                 seed=args.seed,
+                beam_width=args.beam,
                 **model_cfg,
             )
             rows.append(
                 {
-                    "label": ckpt_path,
+                    "label": label,
                     "success_rate": result["success_rate"],
                     "avg_steps": result["avg_steps_solved"],
                     "median_steps": result["median_steps_solved"],

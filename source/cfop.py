@@ -28,6 +28,7 @@ Move index convention (same as data.py):
 """
 
 import pickle
+import random as _random_module
 import sys
 import time
 from collections import deque
@@ -488,24 +489,37 @@ def _ida_pair(state: tuple, sv: frozenset, pi: int, max_bound: int = 24) -> list
     return None
 
 
-def _solve_f2l(state: tuple) -> list[int]:
+def _solve_f2l(state: tuple,
+               rng: "_random_module.Random | None" = None,
+               randomize: bool = False) -> list[int]:
     """Solve the 4 pairs in dynamic order: insert whichever pair is currently
     accessible (shortest first) via PDB-guided IDA*; fall back to a short
-    deadlock-break maneuver only when no pair is directly accessible."""
+    deadlock-break maneuver only when no pair is directly accessible.
+
+    When randomize=True and rng is provided, instead of always picking the
+    globally shortest solvable pair, a random accessible pair is chosen.
+    """
     all_moves: list[int] = []
     solved: set[int] = set()
     deadlock_breaks = 0
     while len(solved) < 4:
         sv = frozenset(solved)
-        best = None  # (n_moves, pi, moves)
+        # Collect all currently solvable pairs
+        candidates = []  # list of (n_moves, pi, moves)
         for pi in range(4):
             if pi in solved or not _solvable_now(state, pi):
                 continue
             mv = _ida_pair(state, sv, pi)
-            if mv is not None and (best is None or len(mv) < best[0]):
-                best = (len(mv), pi, mv)
-        if best is not None:
-            _, pi, mv = best
+            if mv is not None:
+                candidates.append((len(mv), pi, mv))
+
+        if candidates:
+            if randomize and rng is not None:
+                # Pick uniformly at random among accessible pairs
+                _, pi, mv = rng.choice(candidates)
+            else:
+                # Original behaviour: pick shortest
+                _, pi, mv = min(candidates, key=lambda x: x[0])
             state = _apply_moves(state, mv)
             all_moves.extend(mv)
             solved.add(pi)
@@ -549,8 +563,25 @@ def _solve_pll(state: tuple) -> list[int]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def solve(state: tuple, verbose: bool = False) -> list[int]:
-    """Solve a cube state via CFOP. Returns a list of move indices 0..17."""
+def solve(state: tuple, verbose: bool = False,
+          randomize: bool = False,
+          rng: "_random_module.Random | None" = None) -> list[int]:
+    """Solve a cube state via CFOP. Returns a list of move indices 0..17.
+
+    Parameters
+    ----------
+    verbose   : print per-stage move counts
+    randomize : when True, introduce variety into the solution while still
+                guaranteeing a correct (fully-solved) result:
+                  - F2L pair order is chosen randomly among accessible pairs
+                  - a random AUF (0-3 U quarter-turns) is prepended before OLL
+                    and before PLL, exploiting the LL table's full coverage
+    rng       : a seeded random.Random instance for reproducibility; if None
+                and randomize=True, a fresh unseeded instance is used.
+    """
+    if randomize and rng is None:
+        rng = _random_module.Random()
+
     solution: list[int] = []
 
     def stage(name, fn):
@@ -561,10 +592,30 @@ def solve(state: tuple, verbose: bool = False) -> list[int]:
         if verbose:
             print(f"  {name:5}: {len(moves):3} moves (total {len(solution)})")
 
+    def stage_auf(name, fn):
+        """Optionally prepend a random AUF (U^k, k in 0..3) before the lookup."""
+        nonlocal state
+        if randomize and rng is not None:
+            k = rng.randrange(4)  # 0 = no AUF, 1/2/3 = U/U2/U'
+            auf_moves = [0] * k   # move index 0 = U (1 quarter-turn)
+        else:
+            k = 0
+            auf_moves = []
+        if auf_moves:
+            state = _apply_moves(state, auf_moves)
+            solution.extend(auf_moves)
+        moves = fn(state)
+        state = _apply_moves(state, moves)
+        solution.extend(moves)
+        if verbose:
+            auf_str = f" (AUF={k})" if k else ""
+            print(f"  {name:5}: {len(auf_moves) + len(moves):3} moves "
+                  f"(total {len(solution)}){auf_str}")
+
     stage("Cross", _solve_cross)
-    stage("F2L", _solve_f2l)
-    stage("OLL", _solve_oll)
-    stage("PLL", _solve_pll)
+    stage("F2L", lambda s: _solve_f2l(s, rng=rng, randomize=randomize))
+    stage_auf("OLL", _solve_oll)
+    stage_auf("PLL", _solve_pll)
 
     if not cube_solved(state):
         raise RuntimeError("CFOP failed: cube not solved after all stages")

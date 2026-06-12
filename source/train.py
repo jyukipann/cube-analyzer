@@ -97,6 +97,12 @@ def train(args: argparse.Namespace) -> None:
     )
     mx.eval(model.parameters())
 
+    # --- optional resume from checkpoint ------------------------------------
+    if args.resume:
+        from mlx.utils import tree_unflatten
+        model.update(tree_unflatten(list(mx.load(args.resume).items())))
+        mx.eval(model.parameters())
+
     # --- banner -------------------------------------------------------------
     log(f"mode:     {args.data}", logfile)
     log(f"config:   d={args.d_model}, layers={args.n_layers}, "
@@ -104,9 +110,14 @@ def train(args: argparse.Namespace) -> None:
         logfile)
     log(f"out-dir:  {out_dir if out_dir else '(none)'}", logfile)
     log(f"parameters: {model.n_params():,}", logfile)
+    if args.resume:
+        log(f"resumed from: {args.resume}", logfile)
     if args.data == "cfop":
         log(f"pool-size: {args.pool_size}, scramble-depth: {args.scramble_depth}",
             logfile)
+        if getattr(args, 'diverse_pool', False):
+            log(f"diverse-pool: ON  (min-depth={args.min_depth}, "
+                f"max-depth={args.scramble_depth}, randomize=True)", logfile)
 
     # --- data source --------------------------------------------------------
     pool = None
@@ -116,6 +127,7 @@ def train(args: argparse.Namespace) -> None:
             if out_dir
             else "source/.cfop_pool.npz"
         )
+        use_diverse = getattr(args, 'diverse_pool', False)
         log(f"loading/building CFOP pool ({args.pool_size} samples)...", logfile)
         pool = load_cfop_pool(
             args.pool_size,
@@ -123,6 +135,8 @@ def train(args: argparse.Namespace) -> None:
             t_max=args.t_max,
             cache_path=pool_cache,
             verbose=True,
+            min_depth=args.min_depth if use_diverse else None,
+            randomize=use_diverse,
         )
         log(f"pool ready: {pool['t'].shape[0]} samples", logfile)
 
@@ -208,6 +222,14 @@ def main() -> None:
     parser.add_argument("--ckpt-every",    type=int, default=0)
     parser.add_argument("--pool-size",     type=int, default=200_000)
     parser.add_argument("--scramble-depth", type=int, default=25)
+    parser.add_argument("--resume",        type=str, default="",
+                        help="path to a checkpoint .npz to continue training from")
+    parser.add_argument("--diverse-pool",  action="store_true",
+                        help="build a diverse CFOP pool with randomized solutions "
+                             "and variable scramble depth (requires --data cfop)")
+    parser.add_argument("--min-depth",     type=int, default=1,
+                        help="minimum scramble depth when --diverse-pool is active "
+                             "(default: 1)")
     args = parser.parse_args()
     train(args)
 
