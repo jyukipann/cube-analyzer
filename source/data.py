@@ -307,6 +307,69 @@ def build_cfop_pool(
     return pool
 
 
+def generate_batch_hindsight(
+    batch_size: int,
+    t_cap: int = 26,
+    identity_goal_frac: float = 0.5,
+) -> dict[str, mx.array]:
+    """Generate a training batch with hindsight goal relabeling.
+
+    This fixes two problems with generate_batch:
+    1. Goal-conditioning is never trained when goal=identity is constant.
+    2. ~75% of compute is wasted on t > ~20 where the label is near-uniform noise.
+
+    Per sample:
+    -----------
+    1. Build a random walk of length j ~ randint(1, t_cap) from identity,
+       storing every intermediate state x_0..x_j and move indices m_1..m_j.
+    2. Choose goal index i:
+       - with probability identity_goal_frac: i = 0 (goal = identity)
+       - else: i = randint(0, j-1) (hindsight: a visited state along the walk)
+    3. Emit: goal = x_i, current = x_j, t = j-i, target = _INV_IDX[m_j]
+       (applying target to x_j recovers x_{j-1}, one step closer to x_i).
+
+    Keys / shapes / dtypes are identical to generate_batch.
+    """
+    rows: dict[str, list] = {k: [] for k in (
+        'gcp', 'gct', 'gep', 'gef',
+        'ccp', 'cct', 'cep', 'cef',
+        't', 'target',
+    )}
+
+    for _ in range(batch_size):
+        j = random.randint(1, t_cap)
+
+        # Build full walk: states[k] = x_k, moves[k] = m_{k+1} (0-indexed)
+        states = [_IDENTITY]
+        moves: list[int] = []
+        state = _IDENTITY
+        for _ in range(j):
+            m = random.randrange(18)
+            state = _compose(state, _MOVES_PY[m])
+            states.append(state)
+            moves.append(m)
+
+        # Choose goal index i
+        if random.random() < identity_goal_frac:
+            i = 0
+        else:
+            i = random.randint(0, j - 1)   # exclusive of j so t >= 1
+
+        goal = states[i]
+        current = states[j]
+        t_val = j - i   # guaranteed >= 1
+
+        gcp, gct, gep, gef = goal
+        rows['gcp'].append(gcp);        rows['gct'].append(gct)
+        rows['gep'].append(gep);        rows['gef'].append(gef)
+        rows['ccp'].append(current[0]); rows['cct'].append(current[1])
+        rows['cep'].append(current[2]); rows['cef'].append(current[3])
+        rows['t'].append(t_val)
+        rows['target'].append(_INV_IDX[moves[-1]])
+
+    return {k: mx.array(v, dtype=mx.int32) for k, v in rows.items()}
+
+
 def load_cfop_pool(
     n_samples: int,
     scramble_depth: int = 25,

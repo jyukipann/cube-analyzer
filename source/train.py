@@ -29,7 +29,7 @@ from mlx.utils import tree_flatten
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "cube"))
 
-from data import generate_batch, load_cfop_pool   # noqa: E402
+from data import generate_batch, generate_batch_hindsight, load_cfop_pool  # noqa: E402
 from model.solver import CubeSolver               # noqa: E402
 
 
@@ -140,6 +140,9 @@ def train(args: argparse.Namespace) -> None:
         if getattr(args, 'diverse_pool', False):
             log(f"diverse-pool: ON  (min-depth={args.min_depth}, "
                 f"max-depth={args.scramble_depth}, randomize=True)", logfile)
+    if args.data == "hindsight":
+        log(f"t-cap: {args.t_cap}, identity-goal-frac: {args.identity_goal_frac}",
+            logfile)
 
     # --- data source --------------------------------------------------------
     pool = None
@@ -173,6 +176,18 @@ def train(args: argparse.Namespace) -> None:
         log(f"validation holdout: {n_val} rows (rows {n_train_pool}..{total_rows-1}); "
             f"training on first {n_train_pool} rows", logfile)
 
+    elif args.data == "hindsight":
+        # hindsight mode: generate a fixed val batch once with a distinct seed
+        import random as _rnd
+        _saved_state = _rnd.getstate()
+        _rnd.seed(999991)   # distinct from training seed
+        val_batch = generate_batch_hindsight(
+            2048,
+            t_cap=args.t_cap,
+            identity_goal_frac=args.identity_goal_frac,
+        )
+        _rnd.setstate(_saved_state)
+        log("validation: 2048-sample held-out hindsight batch (seed=999991)", logfile)
     else:
         # diffusion mode: generate a fixed val batch once with a distinct seed
         # Use Python's random module seeded separately so training RNG is unaffected.
@@ -192,6 +207,12 @@ def train(args: argparse.Namespace) -> None:
     for step in range(1, args.steps + 1):
         if args.data == "cfop":
             batch = _sample_pool(pool, args.batch_size, n_train=n_train_pool)
+        elif args.data == "hindsight":
+            batch = generate_batch_hindsight(
+                args.batch_size,
+                t_cap=args.t_cap,
+                identity_goal_frac=args.identity_goal_frac,
+            )
         else:
             batch = generate_batch(args.batch_size, t_max=args.t_max)
 
@@ -271,8 +292,12 @@ def main() -> None:
     parser.add_argument("--log-every",  type=int,   default=100)
     parser.add_argument("--save",       type=str,   default="")
     # new args
-    parser.add_argument("--data",          choices=["diffusion", "cfop"],
+    parser.add_argument("--data",          choices=["diffusion", "cfop", "hindsight"],
                         default="diffusion")
+    parser.add_argument("--t-cap",          type=int,   default=26,
+                        help="maximum t value for hindsight mode (default: 26)")
+    parser.add_argument("--identity-goal-frac", type=float, default=0.5,
+                        help="fraction of hindsight samples with goal=identity (default: 0.5)")
     parser.add_argument("--out-dir",       type=str, default="")
     parser.add_argument("--ckpt-every",    type=int, default=0)
     parser.add_argument("--pool-size",     type=int, default=200_000)
