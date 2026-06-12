@@ -171,3 +171,8 @@ cython_debug/
 .pypirc
 cubea/
 .DS_Store
+
+# Project artifacts
+runs/
+*.npz
+*.pkl
