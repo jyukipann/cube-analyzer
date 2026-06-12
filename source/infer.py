@@ -14,9 +14,13 @@ Usage
     uv run python source/infer.py \\
         --ckpt runs/diffusion/latest.npz \\
         --n 100 --scramble-depth 8 --beam 8
+    uv run python source/infer.py \\
+        --ckpt runs/diffusion/latest.npz \\
+        --n 100 --scramble-depth 8 --t-mode none
 """
 
 import argparse
+import json
 import math
 import random
 import statistics
@@ -30,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "cube"))
 
 from data import _IDENTITY, _MOVES_PY, _compose   # noqa: E402
-from cfop import solve as cfop_solve, cube_solved  # noqa: E402
+from cfop import solve as cfop_solve, cube_solved, _INV_IDX, _state_key  # noqa: E402
 from model.solver import CubeSolver                # noqa: E402
 
 
@@ -58,6 +62,63 @@ def load_model(
     model.update(tree_unflatten(list(weights.items())))
     mx.eval(model.parameters())
     return model
+
+
+def load_model_auto(
+    ckpt_path: str,
+    d_model: int = 128,
+    n_layers: int = 4,
+    n_heads: int = 4,
+    ffn_mult: int = 4,
+    t_max: int = 100,
+) -> CubeSolver:
+    """Load a CubeSolver, auto-reading config from a sibling .json if present.
+
+    Looks for <ckpt_path>.json (i.e. latest.npz -> latest.json, or
+    ckpt_5000.npz -> ckpt_5000.json). If found, overrides the supplied
+    CLI defaults with the saved values, so the caller does not need to
+    specify --d-model etc. manually.
+    """
+    cfg_path = Path(str(ckpt_path)).with_suffix(".json")
+    if cfg_path.exists():
+        try:
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+            d_model  = cfg.get("d_model",  d_model)
+            n_layers = cfg.get("n_layers", n_layers)
+            n_heads  = cfg.get("n_heads",  n_heads)
+            ffn_mult = cfg.get("ffn_mult", ffn_mult)
+            t_max    = cfg.get("t_max",    t_max)
+            print(f"    config loaded from {cfg_path.name}: "
+                  f"d={d_model}, layers={n_layers}, heads={n_heads}, "
+                  f"ffn_mult={ffn_mult}, t_max={t_max}")
+        except Exception as exc:
+            print(f"    warning: could not read {cfg_path}: {exc}; using defaults")
+
+    return load_model(
+        ckpt_path,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        ffn_mult=ffn_mult,
+        t_max=t_max,
+    )
+
+
+# ---------------------------------------------------------------------------
+# t-conditioning helpers
+# ---------------------------------------------------------------------------
+
+def _t_value(t_mode: str, scramble_depth: int, step: int, t_const: int) -> int:
+    """Return the scalar t value for the given step under the chosen mode."""
+    if t_mode == "countdown":
+        return max(1, scramble_depth - step)
+    elif t_mode == "const":
+        return t_const
+    elif t_mode == "none":
+        return None  # caller must pass t=None to the model
+    else:
+        raise ValueError(f"Unknown t_mode: {t_mode!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +155,8 @@ def rollout(
     scrambles: list[tuple],
     scramble_depth: int,
     max_steps: int,
+    t_mode: str = "countdown",
+    t_const: int | None = None,
 ) -> tuple[list[bool], list[int]]:
     """Greedy model rollout for a batch of scrambled cubes.
 
@@ -103,15 +166,26 @@ def rollout(
     scrambles     : list of N scrambled state tuples (cp,ct,ep,ef)
     scramble_depth: used to set the initial t value (noise level counts down)
     max_steps     : maximum number of steps to attempt
+    t_mode        : 'countdown' | 'const' | 'none'
+    t_const       : fixed t value used when t_mode == 'const'
 
     Returns
     -------
     solved_mask : list[bool] of length N, True if the cube was solved
     steps       : list[int], solved_step (1-indexed) or max_steps if unsolved
     """
+    if t_const is None:
+        t_const = scramble_depth
+
     n = len(scrambles)
     current_states = [s for s in scrambles]  # mutable copy
     solved_step = [-1] * n                   # -1 = unsolved so far
+    prev_move = [-1] * n                     # last move applied, for inverse-ban
+    visited: list[set] = [set() for _ in range(n)]  # cycle detection per cube
+
+    # Seed visited sets with the initial (scrambled) states
+    for i, s in enumerate(scrambles):
+        visited[i].add(_state_key(s))
 
     # Goal for all cubes is the identity (solved state)
     goal_cp, goal_ct, goal_ep, goal_ef = states_to_arrays([_IDENTITY] * n)
@@ -126,9 +200,12 @@ def rollout(
         # but we ignore it; this keeps array shapes uniform and avoids reindexing)
         curr_cp, curr_ct, curr_ep, curr_ef = states_to_arrays(current_states)
 
-        # Noise level counts down: starts at scramble_depth, decreases each step
-        t_val = max(1, scramble_depth - step)
-        t = mx.array([t_val] * n, dtype=mx.int32)
+        # Compute t value for this step
+        t_val = _t_value(t_mode, scramble_depth, step, t_const)
+        if t_val is not None:
+            t = mx.array([t_val] * n, dtype=mx.int32)
+        else:
+            t = None
 
         logits = model(
             goal=(goal_cp, goal_ct, goal_ep, goal_ef),
@@ -136,17 +213,37 @@ def rollout(
             t=t,
         )
         mx.eval(logits)
-        preds = mx.argmax(logits, axis=1).tolist()
+        logits_list = logits.tolist()  # [[18 floats], ...]
 
         # Apply predicted move to each not-yet-solved cube
         for i in active:
-            move_idx = int(preds[i])
-            current_states[i] = _compose(current_states[i], _MOVES_PY[move_idx])
+            row = logits_list[i]
+            # Mask the immediate inverse of the previous move to -inf
+            if prev_move[i] >= 0:
+                inv_idx = _INV_IDX[prev_move[i]]
+                row[inv_idx] = float("-inf")
+            move_idx = int(max(range(18), key=lambda m: row[m]))
+
+            next_state = _compose(current_states[i], _MOVES_PY[move_idx])
+            key = _state_key(next_state)
+
+            # Cycle detection: if this state was seen before, declare stuck
+            if key in visited[i]:
+                # Mark as stuck by flagging solved_step to a sentinel that
+                # won't be -1 but also isn't a valid step; we use max_steps+1
+                # to indicate "stuck, not solved"
+                solved_step[i] = -(max_steps + 1)  # stuck sentinel
+                continue
+
+            visited[i].add(key)
+            prev_move[i] = move_idx
+            current_states[i] = next_state
+
             if cube_solved(current_states[i]):
                 solved_step[i] = step + 1  # 1-indexed step count
 
-    solved_mask = [solved_step[i] != -1 for i in range(n)]
-    steps = [solved_step[i] if solved_step[i] != -1 else max_steps for i in range(n)]
+    solved_mask = [solved_step[i] > 0 for i in range(n)]
+    steps = [solved_step[i] if solved_step[i] > 0 else max_steps for i in range(n)]
     return solved_mask, steps
 
 
@@ -160,6 +257,8 @@ def rollout_beam(
     scramble_depth: int,
     max_steps: int,
     beam_width: int,
+    t_mode: str = "countdown",
+    t_const: int | None = None,
 ) -> tuple[list[bool], list[int]]:
     """Beam-search model rollout for a batch of scrambled cubes.
 
@@ -170,6 +269,8 @@ def rollout_beam(
     scramble_depth: used to set the initial t value (noise level counts down)
     max_steps     : maximum number of steps to attempt
     beam_width    : number of candidates to keep per scramble per step
+    t_mode        : 'countdown' | 'const' | 'none'
+    t_const       : fixed t value used when t_mode == 'const'
 
     Returns
     -------
@@ -179,19 +280,25 @@ def rollout_beam(
     Notes
     -----
     Each scramble maintains an independent beam of up to `beam_width`
-    (state, cumulative_logprob) candidates.  At each step we batch ALL live
-    candidates across ALL unsolved scrambles into a single model forward pass,
-    convert logits to log-probabilities, expand by the top-`beam_width` moves,
+    (state, cumulative_logprob, last_move_idx) candidates. At each step we
+    batch ALL live candidates across ALL unsolved scrambles into a single
+    model forward pass, convert logits to log-probabilities, expand by the
+    top-`beam_width` moves (banning the immediate inverse), deduplicate
+    candidates by state within each beam (keeping the higher-logprob copy),
     and keep the top-`beam_width` children per scramble ranked by cumulative
-    log-probability.  If any candidate is solved we record that scramble as
+    log-probability. If any candidate is solved we record that scramble as
     done and stop expanding it.
     """
+    if t_const is None:
+        t_const = scramble_depth
+
     n = len(scrambles)
 
-    # Each scramble starts with a beam of one candidate: (state, logprob=0.0)
-    # beams[i] = list of (state_tuple, cumulative_logprob)
-    beams: list[list[tuple[tuple, float]]] = [
-        [(s, 0.0)] for s in scrambles
+    # Each scramble starts with a beam of one candidate:
+    # (state, logprob=0.0, last_move_idx=-1)
+    # beams[i] = list of (state_tuple, cumulative_logprob, last_move_idx)
+    beams: list[list[tuple[tuple, float, int]]] = [
+        [(s, 0.0, -1)] for s in scrambles
     ]
 
     solved_step = [-1] * n  # -1 = unsolved so far
@@ -209,10 +316,12 @@ def rollout_beam(
         # candidate_owner[k] = which scramble index owns the k-th candidate.
         candidate_states: list[tuple] = []
         candidate_owner: list[int] = []
+        candidate_last_move: list[int] = []
         for i in active:
-            for state, _lp in beams[i]:
+            for state, _lp, last_mi in beams[i]:
                 candidate_states.append(state)
                 candidate_owner.append(i)
+                candidate_last_move.append(last_mi)
 
         batch_size = len(candidate_states)
 
@@ -222,8 +331,11 @@ def rollout_beam(
             [goal_state] * batch_size
         )
 
-        t_val = max(1, scramble_depth - step)
-        t = mx.array([t_val] * batch_size, dtype=mx.int32)
+        t_val = _t_value(t_mode, scramble_depth, step, t_const)
+        if t_val is not None:
+            t = mx.array([t_val] * batch_size, dtype=mx.int32)
+        else:
+            t = None
 
         logits = model(
             goal=(goal_cp, goal_ct, goal_ep, goal_ef),
@@ -244,48 +356,68 @@ def rollout_beam(
         # candidate_lp[k] = cumulative logprob of the k-th candidate in the batch
         candidate_lp: list[float] = []
         for i in active:
-            for _state, lp in beams[i]:
+            for _state, lp, _mi in beams[i]:
                 candidate_lp.append(lp)
 
-        # Expand: for each scramble collect all (child_state, child_logprob) pairs,
-        # keep top beam_width by child_logprob.
+        # Expand: for each scramble collect all (child_state, child_logprob, move_idx)
+        # pairs, deduplicate by state key (keep highest logprob copy), then keep top
+        # beam_width by child_logprob.
         # Group rows by scramble index.
         scramble_rows: dict[int, list[int]] = {i: [] for i in active}
         for k, i in enumerate(candidate_owner):
             scramble_rows[i].append(k)
 
-        new_beams: dict[int, list[tuple[tuple, float]]] = {}
+        new_beams: dict[int, list[tuple[tuple, float, int]]] = {}
         for i in active:
             rows = scramble_rows[i]
             # Collect up to beam_width expansions per parent row, then take
             # global top beam_width across all parents for this scramble.
-            children: list[tuple[float, tuple]] = []
+            children: list[tuple[float, tuple, int]] = []  # (logprob, state, move_idx)
             for k in rows:
                 parent_lp = candidate_lp[k]
                 parent_state = candidate_states[k]
-                row_log_probs = log_probs_list[k]  # 18 floats
+                last_mi = candidate_last_move[k]
+                row_log_probs = list(log_probs_list[k])  # 18 floats (copy)
+
+                # Ban the immediate inverse of the last move
+                if last_mi >= 0:
+                    inv_idx = _INV_IDX[last_mi]
+                    row_log_probs[inv_idx] = float("-inf")
 
                 # Sort moves by logprob descending; only expand top beam_width
-                # to bound cost while staying correct (top-beam_width suffices
-                # because any lower-ranked move would produce a lower-prob child).
                 sorted_moves = sorted(
                     range(18), key=lambda m: row_log_probs[m], reverse=True
                 )[:beam_width]
 
                 for move_idx in sorted_moves:
+                    if row_log_probs[move_idx] == float("-inf"):
+                        continue
                     child_state = _compose(parent_state, _MOVES_PY[move_idx])
                     child_lp = parent_lp + row_log_probs[move_idx]
-                    children.append((child_lp, child_state))
+                    children.append((child_lp, child_state, move_idx))
+
+            # Deduplicate by state key: keep the copy with the highest logprob
+            seen_keys: dict[tuple, int] = {}  # key -> index in deduped list
+            deduped: list[tuple[float, tuple, int]] = []
+            for child_lp, child_state, move_idx in children:
+                k = _state_key(child_state)
+                if k in seen_keys:
+                    idx = seen_keys[k]
+                    if child_lp > deduped[idx][0]:
+                        deduped[idx] = (child_lp, child_state, move_idx)
+                else:
+                    seen_keys[k] = len(deduped)
+                    deduped.append((child_lp, child_state, move_idx))
 
             # Keep top beam_width children; break ties arbitrarily
-            children.sort(key=lambda x: x[0], reverse=True)
-            children = children[:beam_width]
+            deduped.sort(key=lambda x: x[0], reverse=True)
+            deduped = deduped[:beam_width]
 
-            new_beams[i] = [(st, lp) for lp, st in children]
+            new_beams[i] = [(st, lp, mi) for lp, st, mi in deduped]
 
         # Check for solved states; commit new beams
         for i in active:
-            for state, lp in new_beams[i]:
+            for state, lp, mi in new_beams[i]:
                 if cube_solved(state):
                     solved_step[i] = step + 1  # 1-indexed
                     break
@@ -323,6 +455,8 @@ def evaluate(
     max_steps: int | None = None,
     seed: int = 0,
     beam_width: int = 0,
+    t_mode: str = "countdown",
+    t_const: int | None = None,
     **model_cfg,
 ) -> dict:
     """Evaluate a checkpoint on n scrambles.
@@ -332,10 +466,12 @@ def evaluate(
     ckpt_path     : path to the .npz checkpoint
     n             : number of scrambles to evaluate
     scramble_depth: depth of each scramble
-    max_steps     : maximum rollout steps (default: scramble_depth * 4)
+    max_steps     : maximum rollout steps (0/None = auto: max(60, scramble_depth*6))
     seed          : random seed for scramble generation
     beam_width    : if > 0, use beam search with this width; 0 = greedy
-    **model_cfg   : forwarded to load_model (d_model, n_layers, etc.)
+    t_mode        : 'countdown' | 'const' | 'none'
+    t_const       : fixed t value for t_mode='const' (default = scramble_depth)
+    **model_cfg   : forwarded to load_model_auto (d_model, n_layers, etc.)
 
     Returns
     -------
@@ -343,17 +479,24 @@ def evaluate(
                     median_steps_solved, scramble_depth, max_steps, beam_width
     """
     if max_steps is None or max_steps <= 0:
-        max_steps = scramble_depth * 4
+        max_steps = max(60, scramble_depth * 6)
 
-    model = load_model(ckpt_path, **model_cfg)
+    if t_const is None:
+        t_const = scramble_depth
+
+    model = load_model_auto(ckpt_path, **model_cfg)
     scrambles = _generate_scrambles(n, scramble_depth, seed=seed)
 
     if beam_width > 0:
         solved_mask, steps = rollout_beam(
-            model, scrambles, scramble_depth, max_steps, beam_width
+            model, scrambles, scramble_depth, max_steps, beam_width,
+            t_mode=t_mode, t_const=t_const,
         )
     else:
-        solved_mask, steps = rollout(model, scrambles, scramble_depth, max_steps)
+        solved_mask, steps = rollout(
+            model, scrambles, scramble_depth, max_steps,
+            t_mode=t_mode, t_const=t_const,
+        )
 
     n_solved = sum(solved_mask)
     success_rate = n_solved / n
@@ -474,7 +617,7 @@ def main() -> None:
         "--max-steps",
         type=int,
         default=0,
-        help="Max rollout steps (0 = auto: scramble_depth * 4).",
+        help="Max rollout steps (0 = auto: max(60, scramble_depth * 6)).",
     )
     parser.add_argument("--seed", type=int, default=0, help="RNG seed.")
     parser.add_argument(
@@ -489,6 +632,24 @@ def main() -> None:
         metavar="WIDTH",
         help="Beam width for beam-search rollout (0 = greedy, default).",
     )
+    # t-conditioning mode
+    parser.add_argument(
+        "--t-mode",
+        choices=["countdown", "const", "none"],
+        default="countdown",
+        help=(
+            "How to condition the model on noise level t at each step. "
+            "'countdown': t = max(1, scramble_depth - step) [default]. "
+            "'const': t = --t-const every step. "
+            "'none': pass t=None to the model (unconditional)."
+        ),
+    )
+    parser.add_argument(
+        "--t-const",
+        type=int,
+        default=None,
+        help="Fixed t value used when --t-mode const (default = scramble_depth).",
+    )
     # Model architecture args (for non-default checkpoints)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--n-layers", type=int, default=4)
@@ -499,7 +660,8 @@ def main() -> None:
     args = parser.parse_args()
 
     max_steps = args.max_steps if args.max_steps > 0 else None
-    effective_max = max_steps if max_steps is not None else args.scramble_depth * 4
+    effective_max = max_steps if max_steps is not None else max(60, args.scramble_depth * 6)
+    t_const = args.t_const if args.t_const is not None else args.scramble_depth
 
     model_cfg = dict(
         d_model=args.d_model,
@@ -512,7 +674,8 @@ def main() -> None:
     beam_mode = args.beam > 0
     print(
         f"Evaluating: n={args.n}, scramble_depth={args.scramble_depth}, "
-        f"max_steps={effective_max}, seed={args.seed}"
+        f"max_steps={effective_max}, seed={args.seed}, t_mode={args.t_mode}"
+        + (f", t_const={t_const}" if args.t_mode == "const" else "")
         + (f", beam_width={args.beam}" if beam_mode else "")
     )
 
@@ -529,6 +692,8 @@ def main() -> None:
                 max_steps=max_steps,
                 seed=args.seed,
                 beam_width=args.beam,
+                t_mode=args.t_mode,
+                t_const=t_const,
                 **model_cfg,
             )
             rows.append(
