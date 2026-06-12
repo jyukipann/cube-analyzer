@@ -201,6 +201,8 @@ def build_cfop_pool(
     t_max: int = 100,
     cache_path: str | None = None,
     verbose: bool = True,
+    min_depth: int | None = None,
+    randomize: bool = False,
 ) -> dict[str, mx.array]:
     """Build a large pool of behavioral-cloning samples from the CFOP solver.
 
@@ -211,10 +213,15 @@ def build_cfop_pool(
     Parameters
     ----------
     n_samples     : total samples to accumulate
-    scramble_depth: number of random moves used to scramble each cube
+    scramble_depth: number of random moves used to scramble each cube (max depth
+                    when min_depth is set)
     t_max         : maximum t value (distance-to-go is clamped to [1, t_max])
     cache_path    : if given, save the finished pool as an .npz file here
     verbose       : print progress every ~10000 samples
+    min_depth     : if set, each scramble uses a random depth in
+                    [min_depth, scramble_depth]; None = fixed scramble_depth
+    randomize     : if True, pass randomize=True to cfop.solve() so that
+                    pair order and AUF choices vary per scramble
 
     Returns
     -------
@@ -239,15 +246,26 @@ def build_cfop_pool(
     n_scrambles = 0
     t0 = time.time()
     last_report = 0
+    # Single seeded RNG for reproducibility; used both for scramble depth
+    # selection and (if randomize=True) passed to cfop.solve per scramble.
+    _rng = random.Random(42)
 
     while collected < n_samples:
+        # Determine scramble depth for this cube
+        depth = (_rng.randint(min_depth, scramble_depth)
+                 if min_depth is not None
+                 else scramble_depth)
+
         # Scramble from identity
         state = _IDENTITY
-        for _ in range(scramble_depth):
-            state = _compose(state, _MOVES_PY[random.randrange(18)])
+        for _ in range(depth):
+            state = _compose(state, _MOVES_PY[_rng.randrange(18)])
+
+        # Per-scramble solver RNG (only used when randomize=True)
+        solve_rng = random.Random(_rng.randrange(2**32)) if randomize else None
 
         try:
-            solution = _cfop.solve(state)
+            solution = _cfop.solve(state, randomize=randomize, rng=solve_rng)
         except RuntimeError:
             continue
 
@@ -295,6 +313,8 @@ def load_cfop_pool(
     t_max: int = 100,
     cache_path: str = "source/.cfop_pool.npz",
     verbose: bool = True,
+    min_depth: int | None = None,
+    randomize: bool = False,
 ) -> dict[str, mx.array]:
     """Load a CFOP sample pool from cache, or build (and save) it if needed.
 
@@ -305,31 +325,54 @@ def load_cfop_pool(
     Parameters
     ----------
     n_samples  : number of samples required
-    cache_path : path to the .npz cache file
+    cache_path : path to the .npz cache file (used as the base path; a diverse
+                 pool automatically gets a distinct suffix so it does not
+                 collide with the plain pool cache)
+    min_depth  : if set, scramble depth varies randomly in [min_depth, scramble_depth]
+    randomize  : if True, solver introduces pair-order and AUF diversity;
+                 a distinct cache file is used (never collides with plain pool)
     (other params forwarded to build_cfop_pool when a rebuild is needed)
     """
-    p = Path(cache_path)
-    if p.exists():
-        try:
-            loaded = mx.load(str(p))
-            # Check row count using one of the arrays
-            sample_arr = loaded.get('t')
-            if sample_arr is not None and sample_arr.shape[0] >= n_samples:
+    # Derive a cache path that encodes diversity settings so diverse and plain
+    # pools never share the same file.  When randomize=True we skip caching
+    # entirely (randomized pools intentionally vary per run).
+    effective_cache: str | None
+    if randomize:
+        effective_cache = None  # do not cache randomized pools
+    elif min_depth is not None:
+        # Embed min_depth into the filename stem to avoid collisions
+        p_obj = Path(cache_path)
+        stem = p_obj.stem + f"_min{min_depth}_max{scramble_depth}"
+        effective_cache = str(p_obj.with_name(stem + p_obj.suffix))
+    else:
+        effective_cache = cache_path
+
+    if effective_cache is not None:
+        p = Path(effective_cache)
+        if p.exists():
+            try:
+                loaded = mx.load(str(p))
+                # Check row count using one of the arrays
+                sample_arr = loaded.get('t')
+                if sample_arr is not None and sample_arr.shape[0] >= n_samples:
+                    if verbose:
+                        print(
+                            f"pool: loaded {sample_arr.shape[0]} samples from "
+                            f"{effective_cache}, slicing to {n_samples}",
+                            flush=True,
+                        )
+                    return {k: v[:n_samples] for k, v in loaded.items()}
+            except Exception as exc:  # noqa: BLE001
                 if verbose:
-                    print(
-                        f"pool: loaded {sample_arr.shape[0]} samples from "
-                        f"{cache_path}, slicing to {n_samples}",
-                        flush=True,
-                    )
-                return {k: v[:n_samples] for k, v in loaded.items()}
-        except Exception as exc:  # noqa: BLE001
-            if verbose:
-                print(f"pool: cache load failed ({exc}); rebuilding", flush=True)
+                    print(f"pool: cache load failed ({exc}); rebuilding",
+                          flush=True)
 
     return build_cfop_pool(
         n_samples,
         scramble_depth=scramble_depth,
         t_max=t_max,
-        cache_path=cache_path,
+        cache_path=effective_cache,
         verbose=verbose,
+        min_depth=min_depth,
+        randomize=randomize,
     )
