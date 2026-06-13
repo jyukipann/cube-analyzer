@@ -29,7 +29,7 @@ from mlx.utils import tree_flatten
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "cube"))
 
-from data import generate_batch, load_cfop_pool   # noqa: E402
+from data import generate_batch, generate_batch_hindsight, load_cfop_pool  # noqa: E402
 from model.solver import CubeSolver               # noqa: E402
 
 
@@ -45,35 +45,69 @@ def log(msg: str, logfile=None) -> None:
         logfile.flush()
 
 
-def _sample_pool(pool: dict, batch_size: int) -> dict:
-    """Sample batch_size random rows from the pool (pure-Python indexing)."""
-    n = pool['t'].shape[0]
+def _sample_pool(pool: dict, batch_size: int, n_train: int | None = None) -> dict:
+    """Sample batch_size random rows from the pool (pure-Python indexing).
+
+    If n_train is given, sampling is restricted to the first n_train rows
+    (i.e. the training split, excluding the validation holdout).
+    """
+    n = n_train if n_train is not None else pool['t'].shape[0]
     idx = [random.randrange(n) for _ in range(batch_size)]
     idx_arr = mx.array(idx)
     return {k: v[idx_arr] for k, v in pool.items()}
+
+
+def _slice_pool(pool: dict, start: int, end: int) -> dict:
+    """Return a contiguous slice [start:end] of the pool."""
+    return {k: v[start:end] for k, v in pool.items()}
 
 
 # ---------------------------------------------------------------------------
 # Loss / accuracy
 # ---------------------------------------------------------------------------
 
-def loss_fn(model: CubeSolver, batch: dict) -> mx.array:
-    logits = model(
+def loss_fn(model: CubeSolver, batch: dict, value_weight: float = 0.0,
+            use_t: bool = True) -> mx.array:
+    t = batch['t'] if use_t else None
+    logits, value = model(
         goal=(batch['gcp'], batch['gct'], batch['gep'], batch['gef']),
         curr=(batch['ccp'], batch['cct'], batch['cep'], batch['cef']),
-        t=batch['t'],
+        t=t,
+        return_value=True,
     )
-    return mx.mean(nn.losses.cross_entropy(logits, batch['target']))
+    ce = mx.mean(nn.losses.cross_entropy(logits, batch['target']))
+    if value_weight == 0.0:
+        return ce
+    # Target = true cost-to-go (walk distance t).  When use_t=False the model
+    # never sees t, so the value head must infer it from the states alone —
+    # a genuine state-based cost-to-go (DeepCubeA-style), not an echo of input.
+    t_float = batch['t'].astype(mx.float32)
+    v_loss = nn.losses.smooth_l1_loss(value, t_float, reduction="mean")
+    return ce + value_weight * v_loss
 
 
-def accuracy(model: CubeSolver, batch: dict) -> float:
+def accuracy(model: CubeSolver, batch: dict, use_t: bool = True) -> float:
+    t = batch['t'] if use_t else None
     logits = model(
         goal=(batch['gcp'], batch['gct'], batch['gep'], batch['gef']),
         curr=(batch['ccp'], batch['cct'], batch['cep'], batch['cef']),
-        t=batch['t'],
+        t=t,
     )
     preds = mx.argmax(logits, axis=1)
     return float(mx.mean(preds == batch['target']))
+
+
+def value_mae(model: CubeSolver, batch: dict, use_t: bool = True) -> float:
+    """Mean absolute error of value head vs true t (cost-to-go proxy)."""
+    t = batch['t'] if use_t else None
+    _, value = model(
+        goal=(batch['gcp'], batch['gct'], batch['gep'], batch['gef']),
+        curr=(batch['ccp'], batch['cct'], batch['cep'], batch['cef']),
+        t=t,
+        return_value=True,
+    )
+    t_float = batch['t'].astype(mx.float32)
+    return float(mx.mean(mx.abs(value - t_float)))
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +131,19 @@ def train(args: argparse.Namespace) -> None:
     )
     mx.eval(model.parameters())
 
+    # Determine ffn_mult: CubeSolver uses 4 as the default (ffn_dim = d_model * ffn_mult)
+    # We pass it through as args.ffn_mult (default 4 matching the model default).
+    ffn_mult = args.ffn_mult
+
+    # Model config dict written alongside each checkpoint
+    model_config = {
+        "d_model":  args.d_model,
+        "n_layers": args.n_layers,
+        "n_heads":  args.n_heads,
+        "ffn_mult": ffn_mult,
+        "t_max":    args.t_max,
+    }
+
     # --- optional resume from checkpoint ------------------------------------
     if args.resume:
         from mlx.utils import tree_unflatten
@@ -106,7 +153,7 @@ def train(args: argparse.Namespace) -> None:
     # --- banner -------------------------------------------------------------
     log(f"mode:     {args.data}", logfile)
     log(f"config:   d={args.d_model}, layers={args.n_layers}, "
-        f"heads={args.n_heads}, batch={args.batch_size}, t_max={args.t_max}",
+        f"heads={args.n_heads}, ffn_mult={ffn_mult}, batch={args.batch_size}, t_max={args.t_max}",
         logfile)
     log(f"out-dir:  {out_dir if out_dir else '(none)'}", logfile)
     log(f"parameters: {model.n_params():,}", logfile)
@@ -118,9 +165,16 @@ def train(args: argparse.Namespace) -> None:
         if getattr(args, 'diverse_pool', False):
             log(f"diverse-pool: ON  (min-depth={args.min_depth}, "
                 f"max-depth={args.scramble_depth}, randomize=True)", logfile)
+    log(f"value-weight: {args.value_weight}, feed-t: {not args.no_t}", logfile)
+    if args.data == "hindsight":
+        log(f"t-cap: {args.t_cap}, identity-goal-frac: {args.identity_goal_frac}",
+            logfile)
 
     # --- data source --------------------------------------------------------
     pool = None
+    val_batch = None      # held-out validation set, built once at startup
+    n_train_pool = None   # for cfop: number of pool rows reserved for training
+
     if args.data == "cfop":
         pool_cache = (
             str(Path(out_dir) / "cfop_pool.npz")
@@ -138,17 +192,59 @@ def train(args: argparse.Namespace) -> None:
             min_depth=args.min_depth if use_diverse else None,
             randomize=use_diverse,
         )
-        log(f"pool ready: {pool['t'].shape[0]} samples", logfile)
+        total_rows = pool['t'].shape[0]
+        log(f"pool ready: {total_rows} samples", logfile)
+
+        # Hold out the last 5% of pool rows for validation
+        n_val = max(1, int(total_rows * 0.05))
+        n_train_pool = total_rows - n_val
+        val_batch = _slice_pool(pool, n_train_pool, total_rows)
+        log(f"validation holdout: {n_val} rows (rows {n_train_pool}..{total_rows-1}); "
+            f"training on first {n_train_pool} rows", logfile)
+
+    elif args.data == "hindsight":
+        # hindsight mode: generate a fixed val batch once with a distinct seed
+        import random as _rnd
+        _saved_state = _rnd.getstate()
+        _rnd.seed(999991)   # distinct from training seed
+        val_batch = generate_batch_hindsight(
+            2048,
+            t_cap=args.t_cap,
+            identity_goal_frac=args.identity_goal_frac,
+        )
+        _rnd.setstate(_saved_state)
+        log("validation: 2048-sample held-out hindsight batch (seed=999991)", logfile)
+    else:
+        # diffusion mode: generate a fixed val batch once with a distinct seed
+        # Use Python's random module seeded separately so training RNG is unaffected.
+        import random as _rnd
+        _saved_state = _rnd.getstate()
+        _rnd.seed(999983)   # distinct from training; any fixed value works
+        val_batch = generate_batch(2048, t_max=args.t_max)
+        _rnd.setstate(_saved_state)
+        log("validation: 2048-sample held-out diffusion batch (seed=999983)", logfile)
 
     # --- optimizer ----------------------------------------------------------
     optimizer = optim.Adam(learning_rate=args.lr)
-    loss_and_grad = nn.value_and_grad(model, loss_fn)
+    _vw = args.value_weight
+    _use_t = not getattr(args, 'no_t', False)
+
+    def _loss_fn(model: CubeSolver, batch: dict) -> mx.array:
+        return loss_fn(model, batch, value_weight=_vw, use_t=_use_t)
+
+    loss_and_grad = nn.value_and_grad(model, _loss_fn)
 
     # --- loop ---------------------------------------------------------------
     t0 = time.time()
     for step in range(1, args.steps + 1):
         if args.data == "cfop":
-            batch = _sample_pool(pool, args.batch_size)
+            batch = _sample_pool(pool, args.batch_size, n_train=n_train_pool)
+        elif args.data == "hindsight":
+            batch = generate_batch_hindsight(
+                args.batch_size,
+                t_cap=args.t_cap,
+                identity_goal_frac=args.identity_goal_frac,
+            )
         else:
             batch = generate_batch(args.batch_size, t_max=args.t_max)
 
@@ -157,24 +253,29 @@ def train(args: argparse.Namespace) -> None:
         mx.eval(model.parameters(), optimizer.state)
 
         if step % args.log_every == 0:
-            if args.data == "cfop":
-                val_batch = _sample_pool(pool, 512)
-            else:
-                val_batch = generate_batch(512, t_max=args.t_max)
-            acc = accuracy(model, val_batch)
+            # Training loss (from the most recent training batch)
+            train_loss = float(loss)
+
+            # Held-out validation metrics
+            val_acc = accuracy(model, val_batch, use_t=_use_t)
+            val_loss_val = float(loss_fn(model, val_batch, value_weight=_vw, use_t=_use_t))
+            val_vmae = value_mae(model, val_batch, use_t=_use_t)
             mx.eval()
             elapsed = time.time() - t0
             steps_per_s = step / elapsed
-            msg = (f"step {step:6d}  loss {float(loss):.4f}  "
-                   f"acc {acc:.3f}  "
+            msg = (f"step {step:6d}  train_loss {train_loss:.4f}  "
+                   f"val_loss {val_loss_val:.4f}  val_acc {val_acc:.3f}  "
+                   f"value_mae {val_vmae:.3f}  "
                    f"({elapsed:.1f}s, {steps_per_s:.1f} steps/s)")
             log(msg, logfile)
 
             if metrics_path is not None:
                 record = {
                     "step": step,
-                    "loss": float(loss),
-                    "acc": float(acc),
+                    "train_loss": train_loss,
+                    "loss": val_loss_val,    # keep backward-compatible key name
+                    "acc": float(val_acc),   # now held-out accuracy
+                    "value_mae": val_vmae,
                     "steps_per_s": round(steps_per_s, 3),
                 }
                 with open(metrics_path, "a") as mf:
@@ -187,13 +288,23 @@ def train(args: argparse.Namespace) -> None:
             latest_path = str(Path(out_dir) / "latest.npz")
             mx.savez(ckpt_path, **weights)
             mx.savez(latest_path, **weights)
-            log(f"checkpoint saved -> {ckpt_path}", logfile)
+            # Write sibling JSON configs
+            ckpt_cfg_path = str(Path(out_dir) / f"ckpt_{step}.json")
+            latest_cfg_path = str(Path(out_dir) / "latest.json")
+            for cfg_path in (ckpt_cfg_path, latest_cfg_path):
+                with open(cfg_path, "w") as f:
+                    json.dump(model_config, f, indent=2)
+            log(f"checkpoint saved -> {ckpt_path} (+ config json)", logfile)
 
     # --- final save ---------------------------------------------------------
     if args.save:
         weights = dict(tree_flatten(model.parameters()))
         mx.savez(args.save, **weights)
-        log(f"Saved -> {args.save}", logfile)
+        # Write sibling config JSON next to the explicit save path
+        save_cfg_path = str(Path(args.save).with_suffix(".json"))
+        with open(save_cfg_path, "w") as f:
+            json.dump(model_config, f, indent=2)
+        log(f"Saved -> {args.save} (+ {save_cfg_path})", logfile)
 
     if logfile is not None:
         logfile.close()
@@ -216,8 +327,12 @@ def main() -> None:
     parser.add_argument("--log-every",  type=int,   default=100)
     parser.add_argument("--save",       type=str,   default="")
     # new args
-    parser.add_argument("--data",          choices=["diffusion", "cfop"],
+    parser.add_argument("--data",          choices=["diffusion", "cfop", "hindsight"],
                         default="diffusion")
+    parser.add_argument("--t-cap",          type=int,   default=26,
+                        help="maximum t value for hindsight mode (default: 26)")
+    parser.add_argument("--identity-goal-frac", type=float, default=0.5,
+                        help="fraction of hindsight samples with goal=identity (default: 0.5)")
     parser.add_argument("--out-dir",       type=str, default="")
     parser.add_argument("--ckpt-every",    type=int, default=0)
     parser.add_argument("--pool-size",     type=int, default=200_000)
@@ -230,6 +345,14 @@ def main() -> None:
     parser.add_argument("--min-depth",     type=int, default=1,
                         help="minimum scramble depth when --diverse-pool is active "
                              "(default: 1)")
+    parser.add_argument("--ffn-mult",      type=int, default=4,
+                        help="FFN hidden dim multiplier (default: 4, matches model default)")
+    parser.add_argument("--value-weight",  type=float, default=0.5,
+                        help="Weight for the value head Huber loss (default: 0.5)")
+    parser.add_argument("--no-t",          action="store_true",
+                        help="Do not feed the noise level t to the model. The value "
+                             "head must then infer cost-to-go from states alone "
+                             "(DeepCubeA-style); avoids the value head echoing input t.")
     args = parser.parse_args()
     train(args)
 
