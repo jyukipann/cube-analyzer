@@ -66,13 +66,19 @@ def _slice_pool(pool: dict, start: int, end: int) -> dict:
 # Loss / accuracy
 # ---------------------------------------------------------------------------
 
-def loss_fn(model: CubeSolver, batch: dict) -> mx.array:
-    logits = model(
+def loss_fn(model: CubeSolver, batch: dict, value_weight: float = 0.0) -> mx.array:
+    logits, value = model(
         goal=(batch['gcp'], batch['gct'], batch['gep'], batch['gef']),
         curr=(batch['ccp'], batch['cct'], batch['cep'], batch['cef']),
         t=batch['t'],
+        return_value=True,
     )
-    return mx.mean(nn.losses.cross_entropy(logits, batch['target']))
+    ce = mx.mean(nn.losses.cross_entropy(logits, batch['target']))
+    if value_weight == 0.0:
+        return ce
+    t_float = batch['t'].astype(mx.float32)
+    v_loss = nn.losses.smooth_l1_loss(value, t_float, reduction="mean")
+    return ce + value_weight * v_loss
 
 
 def accuracy(model: CubeSolver, batch: dict) -> float:
@@ -83,6 +89,18 @@ def accuracy(model: CubeSolver, batch: dict) -> float:
     )
     preds = mx.argmax(logits, axis=1)
     return float(mx.mean(preds == batch['target']))
+
+
+def value_mae(model: CubeSolver, batch: dict) -> float:
+    """Mean absolute error of value head vs true t (cost-to-go proxy)."""
+    _, value = model(
+        goal=(batch['gcp'], batch['gct'], batch['gep'], batch['gef']),
+        curr=(batch['ccp'], batch['cct'], batch['cep'], batch['cef']),
+        t=batch['t'],
+        return_value=True,
+    )
+    t_float = batch['t'].astype(mx.float32)
+    return float(mx.mean(mx.abs(value - t_float)))
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +158,7 @@ def train(args: argparse.Namespace) -> None:
         if getattr(args, 'diverse_pool', False):
             log(f"diverse-pool: ON  (min-depth={args.min_depth}, "
                 f"max-depth={args.scramble_depth}, randomize=True)", logfile)
+    log(f"value-weight: {args.value_weight}", logfile)
     if args.data == "hindsight":
         log(f"t-cap: {args.t_cap}, identity-goal-frac: {args.identity_goal_frac}",
             logfile)
@@ -200,7 +219,12 @@ def train(args: argparse.Namespace) -> None:
 
     # --- optimizer ----------------------------------------------------------
     optimizer = optim.Adam(learning_rate=args.lr)
-    loss_and_grad = nn.value_and_grad(model, loss_fn)
+    _vw = args.value_weight
+
+    def _loss_fn(model: CubeSolver, batch: dict) -> mx.array:
+        return loss_fn(model, batch, value_weight=_vw)
+
+    loss_and_grad = nn.value_and_grad(model, _loss_fn)
 
     # --- loop ---------------------------------------------------------------
     t0 = time.time()
@@ -226,12 +250,14 @@ def train(args: argparse.Namespace) -> None:
 
             # Held-out validation metrics
             val_acc = accuracy(model, val_batch)
-            val_loss_val = float(loss_fn(model, val_batch))
+            val_loss_val = float(loss_fn(model, val_batch, value_weight=_vw))
+            val_vmae = value_mae(model, val_batch)
             mx.eval()
             elapsed = time.time() - t0
             steps_per_s = step / elapsed
             msg = (f"step {step:6d}  train_loss {train_loss:.4f}  "
                    f"val_loss {val_loss_val:.4f}  val_acc {val_acc:.3f}  "
+                   f"value_mae {val_vmae:.3f}  "
                    f"({elapsed:.1f}s, {steps_per_s:.1f} steps/s)")
             log(msg, logfile)
 
@@ -241,6 +267,7 @@ def train(args: argparse.Namespace) -> None:
                     "train_loss": train_loss,
                     "loss": val_loss_val,    # keep backward-compatible key name
                     "acc": float(val_acc),   # now held-out accuracy
+                    "value_mae": val_vmae,
                     "steps_per_s": round(steps_per_s, 3),
                 }
                 with open(metrics_path, "a") as mf:
@@ -312,6 +339,8 @@ def main() -> None:
                              "(default: 1)")
     parser.add_argument("--ffn-mult",      type=int, default=4,
                         help="FFN hidden dim multiplier (default: 4, matches model default)")
+    parser.add_argument("--value-weight",  type=float, default=0.5,
+                        help="Weight for the value head Huber loss (default: 0.5)")
     args = parser.parse_args()
     train(args)
 

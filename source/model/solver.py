@@ -5,10 +5,11 @@ Architecture
 Input:  goal state + current state, each encoded as 20 piece tokens.
         Concatenated to a 40-token sequence.
 Output: logits over 18 moves (6 faces × {1-turn, 2-turn, 3-turn}).
+        Optionally also a scalar cost-to-go (value) estimate.
 
 Each piece token = slot_emb + role_emb + piece_id_emb + orientation_emb.
 A Transformer encoder attends over all 40 tokens; mean-pooled output feeds
-the 18-class head.
+the 18-class policy head and a scalar value head.
 
 Noise level ``t`` (diffusion timestep) is optionally broadcast-added to every
 token so the same weights serve both supervised and diffusion training.
@@ -53,14 +54,16 @@ class CubeSolver(nn.Module):
 
     Forward signature
     -----------------
-    model(goal, curr, t=None) -> logits [B, 18]
+    model(goal, curr, t=None, return_value=False) -> logits [B, 18]
+        or (logits [B, 18], value [B]) if return_value=True
 
     goal / curr : tuple (cp, ct, ep, ef) of int32 arrays
         cp  [B, 8]  corner positions (piece id at each slot)
         ct  [B, 8]  corner twists   (0 / 1 / 2)
         ep  [B, 12] edge positions
         ef  [B, 12] edge flips      (0 / 1)
-    t   : [B] int32 noise level (optional)
+    t            : [B] int32 noise level (optional)
+    return_value : if True, also return scalar cost-to-go estimate [B]
     """
 
     def __init__(
@@ -84,6 +87,7 @@ class CubeSolver(nn.Module):
         self.layers = [_Layer(d_model, n_heads, ffn_dim) for _ in range(n_layers)]
         self.norm = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, N_MOVES)
+        self.value_head = nn.Linear(d_model, 1)
 
     # ------------------------------------------------------------------ encode
     def _encode(
@@ -116,7 +120,15 @@ class CubeSolver(nn.Module):
         goal: tuple,
         curr: tuple,
         t: mx.array | None = None,
-    ) -> mx.array:  # [B, N_MOVES]
+        return_value: bool = False,
+    ) -> mx.array | tuple[mx.array, mx.array]:
+        """Forward pass.
+
+        Returns
+        -------
+        logits           : [B, N_MOVES]  (always)
+        (logits, value)  : ([B, N_MOVES], [B])  when return_value=True
+        """
         g = self._encode(*goal, role=0)             # [B, 20, d]
         c = self._encode(*curr, role=1)             # [B, 20, d]
         x = mx.concatenate([g, c], axis=1)          # [B, 40, d]
@@ -127,7 +139,13 @@ class CubeSolver(nn.Module):
         for layer in self.layers:
             x = layer(x)
         x = self.norm(x)
-        return self.head(x.mean(axis=1))            # [B, N_MOVES]
+        pooled = x.mean(axis=1)                     # [B, d]
+        logits = self.head(pooled)                  # [B, N_MOVES]
+
+        if return_value:
+            value = self.value_head(pooled).squeeze(-1)  # [B]
+            return logits, value
+        return logits
 
     def n_params(self) -> int:
         return sum(p.size for _, p in tree_flatten(self.parameters()))
