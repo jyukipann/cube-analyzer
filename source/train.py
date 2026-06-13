@@ -66,37 +66,44 @@ def _slice_pool(pool: dict, start: int, end: int) -> dict:
 # Loss / accuracy
 # ---------------------------------------------------------------------------
 
-def loss_fn(model: CubeSolver, batch: dict, value_weight: float = 0.0) -> mx.array:
+def loss_fn(model: CubeSolver, batch: dict, value_weight: float = 0.0,
+            use_t: bool = True) -> mx.array:
+    t = batch['t'] if use_t else None
     logits, value = model(
         goal=(batch['gcp'], batch['gct'], batch['gep'], batch['gef']),
         curr=(batch['ccp'], batch['cct'], batch['cep'], batch['cef']),
-        t=batch['t'],
+        t=t,
         return_value=True,
     )
     ce = mx.mean(nn.losses.cross_entropy(logits, batch['target']))
     if value_weight == 0.0:
         return ce
+    # Target = true cost-to-go (walk distance t).  When use_t=False the model
+    # never sees t, so the value head must infer it from the states alone —
+    # a genuine state-based cost-to-go (DeepCubeA-style), not an echo of input.
     t_float = batch['t'].astype(mx.float32)
     v_loss = nn.losses.smooth_l1_loss(value, t_float, reduction="mean")
     return ce + value_weight * v_loss
 
 
-def accuracy(model: CubeSolver, batch: dict) -> float:
+def accuracy(model: CubeSolver, batch: dict, use_t: bool = True) -> float:
+    t = batch['t'] if use_t else None
     logits = model(
         goal=(batch['gcp'], batch['gct'], batch['gep'], batch['gef']),
         curr=(batch['ccp'], batch['cct'], batch['cep'], batch['cef']),
-        t=batch['t'],
+        t=t,
     )
     preds = mx.argmax(logits, axis=1)
     return float(mx.mean(preds == batch['target']))
 
 
-def value_mae(model: CubeSolver, batch: dict) -> float:
+def value_mae(model: CubeSolver, batch: dict, use_t: bool = True) -> float:
     """Mean absolute error of value head vs true t (cost-to-go proxy)."""
+    t = batch['t'] if use_t else None
     _, value = model(
         goal=(batch['gcp'], batch['gct'], batch['gep'], batch['gef']),
         curr=(batch['ccp'], batch['cct'], batch['cep'], batch['cef']),
-        t=batch['t'],
+        t=t,
         return_value=True,
     )
     t_float = batch['t'].astype(mx.float32)
@@ -158,7 +165,7 @@ def train(args: argparse.Namespace) -> None:
         if getattr(args, 'diverse_pool', False):
             log(f"diverse-pool: ON  (min-depth={args.min_depth}, "
                 f"max-depth={args.scramble_depth}, randomize=True)", logfile)
-    log(f"value-weight: {args.value_weight}", logfile)
+    log(f"value-weight: {args.value_weight}, feed-t: {not args.no_t}", logfile)
     if args.data == "hindsight":
         log(f"t-cap: {args.t_cap}, identity-goal-frac: {args.identity_goal_frac}",
             logfile)
@@ -220,9 +227,10 @@ def train(args: argparse.Namespace) -> None:
     # --- optimizer ----------------------------------------------------------
     optimizer = optim.Adam(learning_rate=args.lr)
     _vw = args.value_weight
+    _use_t = not getattr(args, 'no_t', False)
 
     def _loss_fn(model: CubeSolver, batch: dict) -> mx.array:
-        return loss_fn(model, batch, value_weight=_vw)
+        return loss_fn(model, batch, value_weight=_vw, use_t=_use_t)
 
     loss_and_grad = nn.value_and_grad(model, _loss_fn)
 
@@ -249,9 +257,9 @@ def train(args: argparse.Namespace) -> None:
             train_loss = float(loss)
 
             # Held-out validation metrics
-            val_acc = accuracy(model, val_batch)
-            val_loss_val = float(loss_fn(model, val_batch, value_weight=_vw))
-            val_vmae = value_mae(model, val_batch)
+            val_acc = accuracy(model, val_batch, use_t=_use_t)
+            val_loss_val = float(loss_fn(model, val_batch, value_weight=_vw, use_t=_use_t))
+            val_vmae = value_mae(model, val_batch, use_t=_use_t)
             mx.eval()
             elapsed = time.time() - t0
             steps_per_s = step / elapsed
@@ -341,6 +349,10 @@ def main() -> None:
                         help="FFN hidden dim multiplier (default: 4, matches model default)")
     parser.add_argument("--value-weight",  type=float, default=0.5,
                         help="Weight for the value head Huber loss (default: 0.5)")
+    parser.add_argument("--no-t",          action="store_true",
+                        help="Do not feed the noise level t to the model. The value "
+                             "head must then infer cost-to-go from states alone "
+                             "(DeepCubeA-style); avoids the value head echoing input t.")
     args = parser.parse_args()
     train(args)
 
