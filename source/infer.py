@@ -440,16 +440,18 @@ def rollout_value_beam(
     beam_width: int,
     t_mode: str = "countdown",
     t_const: int | None = None,
+    expand_all: bool = False,
 ) -> tuple[list[bool], list[int]]:
-    """Policy-proposal + value-ranking beam search.
+    """Value-ranking beam search.
 
     At each step:
-    1. Expand each live candidate with its policy's top-beam_width moves.
+    1. Expand each live candidate's children.  If expand_all=False, only the
+       policy's top-beam_width moves are tried (policy-pruned); if expand_all=True,
+       ALL 18 moves are expanded (the immediate inverse is always banned) — this
+       is the proper DeepCubeA-style value search, where the (trained) value
+       head does all the pruning and the policy is not relied upon.
     2. Score every child by the value head (predicted cost-to-go).
     3. Keep the top-beam_width children per scramble with the LOWEST value.
-
-    Both policy logits and value estimates come from the same batched forward
-    pass (return_value=True).  A second batched forward scores the children.
 
     Parameters
     ----------
@@ -462,6 +464,7 @@ def rollout_value_beam(
     beam_width    : candidates to keep per scramble per step
     t_mode        : 'countdown' | 'const' | 'none'
     t_const       : fixed t for t_mode='const'
+    expand_all    : expand all 18 children (True) vs policy top-beam_width (False)
 
     Returns
     -------
@@ -497,42 +500,55 @@ def rollout_value_beam(
                 candidate_owner.append(i)
                 candidate_last_move.append(last_mi)
 
-        batch_size = len(candidate_states)
-        curr_cp, curr_ct, curr_ep, curr_ef = states_to_arrays(candidate_states)
-        goal_cp, goal_ct, goal_ep, goal_ef = states_to_arrays(
-            [goal_state] * batch_size
-        )
-
-        t_val = _t_value(t_mode, scramble_depth, step, t_const)
-        t = mx.array([t_val] * batch_size, dtype=mx.int32) if t_val is not None else None
-
-        # Policy forward (no value needed here; we only need logits for proposals)
-        logits = model(
-            goal=(goal_cp, goal_ct, goal_ep, goal_ef),
-            curr=(curr_cp, curr_ct, curr_ep, curr_ef),
-            t=t,
-        )
-        mx.eval(logits)
-        logits_list = logits.tolist()
-
-        # Expand: build children grouped by scramble
         scramble_children: dict[int, list[tuple[tuple, int]]] = {i: [] for i in active}
-        for k, i in enumerate(candidate_owner):
-            row = list(logits_list[k])
-            last_mi = candidate_last_move[k]
-            parent_state = candidate_states[k]
 
-            # Ban the immediate inverse move
-            if last_mi >= 0:
-                row[_INV_IDX[last_mi]] = float("-inf")
+        if expand_all:
+            # Expand every move except the immediate inverse; the value head
+            # (next forward) prunes.  No policy forward needed.
+            for k, i in enumerate(candidate_owner):
+                last_mi = candidate_last_move[k]
+                parent_state = candidate_states[k]
+                banned = _INV_IDX[last_mi] if last_mi >= 0 else -1
+                for move_idx in range(18):
+                    if move_idx == banned:
+                        continue
+                    child_state = _compose(parent_state, _MOVES_PY[move_idx])
+                    scramble_children[i].append((child_state, move_idx))
+        else:
+            batch_size = len(candidate_states)
+            curr_cp, curr_ct, curr_ep, curr_ef = states_to_arrays(candidate_states)
+            goal_cp, goal_ct, goal_ep, goal_ef = states_to_arrays(
+                [goal_state] * batch_size
+            )
 
-            # Top beam_width proposals
-            sorted_moves = sorted(range(18), key=lambda m: row[m], reverse=True)[:beam_width]
-            for move_idx in sorted_moves:
-                if row[move_idx] == float("-inf"):
-                    continue
-                child_state = _compose(parent_state, _MOVES_PY[move_idx])
-                scramble_children[i].append((child_state, move_idx))
+            t_val = _t_value(t_mode, scramble_depth, step, t_const)
+            t = mx.array([t_val] * batch_size, dtype=mx.int32) if t_val is not None else None
+
+            # Policy forward to get top-beam_width proposals per candidate
+            logits = model(
+                goal=(goal_cp, goal_ct, goal_ep, goal_ef),
+                curr=(curr_cp, curr_ct, curr_ep, curr_ef),
+                t=t,
+            )
+            mx.eval(logits)
+            logits_list = logits.tolist()
+
+            for k, i in enumerate(candidate_owner):
+                row = list(logits_list[k])
+                last_mi = candidate_last_move[k]
+                parent_state = candidate_states[k]
+
+                # Ban the immediate inverse move
+                if last_mi >= 0:
+                    row[_INV_IDX[last_mi]] = float("-inf")
+
+                # Top beam_width proposals
+                sorted_moves = sorted(range(18), key=lambda m: row[m], reverse=True)[:beam_width]
+                for move_idx in sorted_moves:
+                    if row[move_idx] == float("-inf"):
+                        continue
+                    child_state = _compose(parent_state, _MOVES_PY[move_idx])
+                    scramble_children[i].append((child_state, move_idx))
 
         # ------------------------------------------------------------------
         # Step 2: deduplicate children by state key per scramble, then score
@@ -679,12 +695,13 @@ def evaluate(
     else:
         effective_search = search
 
-    if effective_search == "value-beam":
+    if effective_search in ("value-beam", "value-astar"):
         if beam_width <= 0:
             beam_width = 8  # sensible default if user forgot --beam
         solved_mask, steps = rollout_value_beam(
             model, scrambles, scramble_depth, max_steps, beam_width,
             t_mode=t_mode, t_const=t_const,
+            expand_all=(effective_search == "value-astar"),
         )
     elif effective_search == "beam":
         solved_mask, steps = rollout_beam(
@@ -834,11 +851,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--search",
-        choices=["greedy", "beam", "value-beam"],
+        choices=["greedy", "beam", "value-beam", "value-astar"],
         default=None,
         help=(
             "Search strategy: 'greedy' (argmax), 'beam' (cumulative-logprob beam), "
-            "'value-beam' (policy-proposal + value-ranking). "
+            "'value-beam' (policy-proposal + value-ranking), "
+            "'value-astar' (expand all 18 children, rank by value — DeepCubeA-style). "
             "Default: 'beam' if --beam>0 else 'greedy' (legacy behaviour)."
         ),
     )

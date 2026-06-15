@@ -370,6 +370,92 @@ def generate_batch_hindsight(
     return {k: mx.array(v, dtype=mx.int32) for k, v in rows.items()}
 
 
+def generate_batch_value_iter(
+    batch_size: int,
+    t_cap: int = 26,
+    identity_goal_frac: float = 0.5,
+) -> dict[str, mx.array]:
+    """Generate a batch for DeepCubeA-style value iteration (DAVI).
+
+    Same (goal, current) distribution as generate_batch_hindsight, but in
+    addition to the policy-CE keys it returns, for every sample, the 18 child
+    states ``current . a`` and a mask flagging which children equal the goal.
+
+    The training loop uses these to build a bootstrapped value target
+
+        J*(goal, current) = min_a [ 1 + (0 if child_a == goal else J_target(child_a)) ]
+
+    so the value head learns true cost-to-go rather than the (loose, inflated)
+    walk length ``t``.  The goal-child special-case anchors the recursion at the
+    goal without needing the network to know J(goal, goal) = 0.
+
+    Extra keys (beyond the generate_batch_hindsight set)
+    ----------------------------------------------------
+    chcp [B,18,8]  chct [B,18,8]  chep [B,18,12]  chef [B,18,12]
+        child states current . a for each of the 18 moves a
+    child_is_goal [B,18]  int32 1/0 mask: child_a == goal
+    """
+    rows: dict[str, list] = {k: [] for k in (
+        'gcp', 'gct', 'gep', 'gef',
+        'ccp', 'cct', 'cep', 'cef',
+        't', 'target',
+    )}
+    ch_cp: list = []
+    ch_ct: list = []
+    ch_ep: list = []
+    ch_ef: list = []
+    ch_isgoal: list = []
+
+    for _ in range(batch_size):
+        j = random.randint(1, t_cap)
+
+        states = [_IDENTITY]
+        moves: list[int] = []
+        state = _IDENTITY
+        for _ in range(j):
+            m = random.randrange(18)
+            state = _compose(state, _MOVES_PY[m])
+            states.append(state)
+            moves.append(m)
+
+        if random.random() < identity_goal_frac:
+            i = 0
+        else:
+            i = random.randint(0, j - 1)
+
+        goal = states[i]
+        current = states[j]
+        t_val = j - i
+
+        gcp, gct, gep, gef = goal
+        rows['gcp'].append(gcp);        rows['gct'].append(gct)
+        rows['gep'].append(gep);        rows['gef'].append(gef)
+        rows['ccp'].append(current[0]); rows['cct'].append(current[1])
+        rows['cep'].append(current[2]); rows['cef'].append(current[3])
+        rows['t'].append(t_val)
+        rows['target'].append(_INV_IDX[moves[-1]])
+
+        # 18 children of `current`
+        s_cp: list = []; s_ct: list = []; s_ep: list = []; s_ef: list = []
+        s_ig: list = []
+        for a in range(18):
+            child = _compose(current, _MOVES_PY[a])
+            s_cp.append(child[0]); s_ct.append(child[1])
+            s_ep.append(child[2]); s_ef.append(child[3])
+            s_ig.append(1 if child == goal else 0)
+        ch_cp.append(s_cp); ch_ct.append(s_ct)
+        ch_ep.append(s_ep); ch_ef.append(s_ef)
+        ch_isgoal.append(s_ig)
+
+    out = {k: mx.array(v, dtype=mx.int32) for k, v in rows.items()}
+    out['chcp'] = mx.array(ch_cp, dtype=mx.int32)
+    out['chct'] = mx.array(ch_ct, dtype=mx.int32)
+    out['chep'] = mx.array(ch_ep, dtype=mx.int32)
+    out['chef'] = mx.array(ch_ef, dtype=mx.int32)
+    out['child_is_goal'] = mx.array(ch_isgoal, dtype=mx.int32)
+    return out
+
+
 def load_cfop_pool(
     n_samples: int,
     scramble_depth: int = 25,
