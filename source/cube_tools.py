@@ -23,6 +23,7 @@ order U=0, D=1, L=2, R=3, F=4, B=5.
 
 from __future__ import annotations
 
+import json
 import random
 import sys
 from pathlib import Path
@@ -148,18 +149,62 @@ def render_net(state: State) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Macro memory (M2): a persistent library of discovered move sequences
+# ---------------------------------------------------------------------------
+
+class MacroMemory:
+    """A small persistent store of named move sequences ("macros").
+
+    The agent can save a sequence that escaped a plateau / produced a useful
+    structured change, then recall and reuse it later.  Backed by a JSON file so
+    discoveries persist across episodes and runs.
+    """
+
+    def __init__(self, path: str | None = None):
+        self.path = Path(path) if path else None
+        self.macros: dict[str, dict] = {}
+        if self.path and self.path.exists():
+            try:
+                self.macros = json.loads(self.path.read_text())
+            except Exception:  # noqa: BLE001
+                self.macros = {}
+
+    def _flush(self) -> None:
+        if self.path:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(self.macros, indent=2, ensure_ascii=False))
+
+    def save(self, name: str, moves: str, note: str = "") -> dict:
+        idxs = parse_moves(moves)              # validate
+        canon = ' '.join(NOTATION[i] for i in idxs)
+        self.macros[name] = {"moves": canon, "note": note, "len": len(idxs)}
+        self._flush()
+        return {"saved": name, "moves": canon, "n_macros": len(self.macros)}
+
+    def list(self) -> dict:
+        return {"macros": [{"name": k, **v} for k, v in self.macros.items()],
+                "count": len(self.macros)}
+
+    def get(self, name: str) -> dict:
+        if name not in self.macros:
+            return {"error": f"no macro named '{name}'"}
+        return {"name": name, **self.macros[name]}
+
+
+# ---------------------------------------------------------------------------
 # Cube session (ground-truth state held here)
 # ---------------------------------------------------------------------------
 
 class CubeSession:
     """A single interactive cube the LLM agent manipulates via tools."""
 
-    def __init__(self, seed: int | None = None):
+    def __init__(self, seed: int | None = None, memory: "MacroMemory | None" = None):
         self.state = State()                 # solved
         self.rng = random.Random(seed)
         self.scramble_moves: list[int] = []   # the scramble that was applied
         self.history: list[int] = []          # committed solving moves
         self._value_model = None              # lazy (M3)
+        self.memory = memory                  # shared MacroMemory (M2), optional
 
     # -- setup ---------------------------------------------------------------
     def reset(self) -> dict:
@@ -233,6 +278,47 @@ class CubeSession:
 
     def inverse(self, moves: str) -> dict:
         return {"moves": moves, "inverse": invert_moves(moves)}
+
+    # -- macro memory (M2) ---------------------------------------------------
+    def save_macro(self, name: str, moves: str, note: str = "") -> dict:
+        if self.memory is None:
+            return {"error": "no macro memory attached"}
+        try:
+            return self.memory.save(name, moves, note)
+        except MoveParseError as exc:
+            return {"error": str(exc)}
+
+    def list_macros(self) -> dict:
+        if self.memory is None:
+            return {"macros": [], "count": 0}
+        return self.memory.list()
+
+    def get_macro(self, name: str) -> dict:
+        if self.memory is None:
+            return {"error": "no macro memory attached"}
+        return self.memory.get(name)
+
+    def test_macro(self, name: str) -> dict:
+        """Preview a saved macro's effect on the current state (no commit)."""
+        if self.memory is None:
+            return {"error": "no macro memory attached"}
+        g = self.memory.get(name)
+        if "error" in g:
+            return g
+        out = self.simulate(g["moves"])
+        out["macro"] = name
+        return out
+
+    def apply_macro(self, name: str) -> dict:
+        """Commit a saved macro's moves to the cube."""
+        if self.memory is None:
+            return {"error": "no macro memory attached"}
+        g = self.memory.get(name)
+        if "error" in g:
+            return g
+        out = self.apply(g["moves"])
+        out["macro"] = name
+        return out
 
     # -- learned intuition (M3) ---------------------------------------------
     def distance(self) -> dict:

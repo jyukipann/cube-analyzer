@@ -64,3 +64,37 @@ def test_scramble_avoids_same_face_repeats():
     s.scramble(30)
     faces = [i // 3 for i in s.scramble_moves]
     assert all(faces[k] != faces[k + 1] for k in range(len(faces) - 1))
+
+
+def test_macro_memory_save_list_get(tmp_path):
+    from cube_tools import MacroMemory
+    mem = MacroMemory(str(tmp_path / "m.json"))
+    r = mem.save("sexy", "R U R' U'", note="6-move trigger")
+    assert r["saved"] == "sexy" and r["n_macros"] == 1
+    assert mem.list()["count"] == 1
+    g = mem.get("sexy")
+    assert g["moves"] == "R U R' U'"
+    # persistence: a fresh memory at the same path reloads it
+    mem2 = MacroMemory(str(tmp_path / "m.json"))
+    assert "sexy" in mem2.macros
+
+
+def test_macro_save_rejects_bad_moves(tmp_path):
+    from cube_tools import MacroMemory
+    mem = MacroMemory(str(tmp_path / "m.json"))
+    with pytest.raises(MoveParseError):
+        mem.save("bad", "R X U")
+
+
+def test_apply_macro_matches_raw_moves(tmp_path):
+    from cube_tools import MacroMemory
+    mem = MacroMemory(str(tmp_path / "m.json"))
+    mem.save("seq", "R U2 F'")
+    a = CubeSession(seed=4, memory=mem)
+    a.scramble(5)
+    b = CubeSession(seed=4, memory=mem)
+    b.scramble(5)
+    a.apply_macro("seq")
+    b.apply("R U2 F'")
+    assert a.observe()["pieces_solved"] == b.observe()["pieces_solved"]
+    assert a.observe()["net"] == b.observe()["net"]

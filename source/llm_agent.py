@@ -27,7 +27,7 @@ _SRC = Path(__file__).resolve().parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from cube_tools import CubeSession, NOTATION, MoveParseError  # noqa: E402
+from cube_tools import CubeSession, MacroMemory, NOTATION, MoveParseError  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -105,28 +105,117 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = (
-    "You are solving a 3x3 Rubik's cube. The cube state is tracked for you — you "
-    "do not need to remember it; just read it from tool results.\n\n"
-    "Notation: faces are U (up), D (down), L (left), R (right), F (front), B (back). "
-    "A bare letter = 90 deg clockwise; a letter+2 = 180 deg (e.g. R2); a letter+' = "
-    "90 deg counter-clockwise (e.g. R'). Valid moves: " + ', '.join(NOTATION) + ".\n\n"
-    "The cube is SOLVED when all 20 pieces are home (pieces_solved = 20, every face "
-    "one color). Your goal: reach pieces_solved = 20.\n\n"
-    "You CANNOT read the net reliably — do not try to reason about colors. Instead "
-    "use the rank_moves INTUITION tool.\n\n"
-    "Tools: rank_moves (ranked next-move suggestions from a learned intuition; lower "
-    "estimated_moves_to_solve = closer to solved; would_solve means it solves now), "
-    "apply (commit moves), simulate (preview without committing), observe, inverse.\n\n"
-    "STRATEGY (follow this loop):\n"
+# Macro-memory tools (M2). Appended to the intuition tools in 'memory' mode.
+MACRO_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "save_macro",
+            "description": "Save a named move sequence (a 'macro') so you can reuse it "
+                           "later, across cubes. Use this when a short sequence reliably "
+                           "made progress or escaped a plateau.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "moves": {"type": "string", "description": "e.g. R U R' U'"},
+                    "note": {"type": "string", "description": "what it does / when to use"},
+                },
+                "required": ["name", "moves"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_macros",
+            "description": "List all saved macros (name, moves, note).",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "test_macro",
+            "description": "Preview a saved macro's effect on the current cube WITHOUT "
+                           "committing (shows delta_pieces_solved).",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_macro",
+            "description": "Commit a saved macro's moves to the cube.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    },
+]
+
+_COMMON = (
+    "You are solving a 3x3 Rubik's cube. The cube state is tracked for you.\n"
+    "Notation: faces U D L R F B. Bare letter = 90 deg CW; +2 = 180 deg (R2); "
+    "+' = 90 deg CCW (R'). Valid moves: " + ', '.join(NOTATION) + ".\n"
+    "SOLVED = all 20 pieces home (pieces_solved = 20). Goal: reach pieces_solved = 20.\n"
+)
+
+INTUITION_PROMPT = _COMMON + (
+    "\nYou CANNOT read the net reliably — do not reason about colors. Use the "
+    "rank_moves INTUITION tool instead.\n"
+    "Tools: rank_moves (next moves ranked by a learned intuition; lower "
+    "estimated_moves_to_solve = closer; would_solve means it solves now), apply "
+    "(commit moves), simulate (preview), observe, inverse.\n"
+    "STRATEGY:\n"
     "1. Call rank_moves.\n"
-    "2. If any move shows would_solve, apply that move — you win.\n"
+    "2. If a move shows would_solve, apply it — you win.\n"
     "3. Otherwise apply the TOP-ranked move (lowest estimate).\n"
-    "4. Repeat. apply is the only tool that changes the real cube.\n"
-    "If the estimate stops improving for several moves (a plateau), try the 2nd or "
-    "3rd ranked move to escape it.\n"
+    "4. Repeat. Only apply changes the real cube.\n"
+    "If the estimate stalls for several moves (plateau), try the 2nd/3rd ranked move.\n"
     "When pieces_solved reaches 20, say SOLVED."
 )
+
+BLIND_PROMPT = _COMMON + (
+    "\nTools: observe (see the net), simulate (preview moves on a scratch copy "
+    "without committing), apply (commit moves), inverse (undo a sequence).\n"
+    "simulate does NOT change the real cube — only apply does. Strategy: read the "
+    "cube, find moves that increase pieces_solved (test with simulate, "
+    "delta_pieces_solved > 0), then APPLY them. Repeat.\n"
+    "When pieces_solved reaches 20, say SOLVED."
+)
+
+MEMORY_PROMPT = INTUITION_PROMPT + (
+    "\n\nYou ALSO have a persistent macro memory shared across cubes:\n"
+    "- save_macro(name, moves, note): remember a useful short sequence.\n"
+    "- list_macros / test_macro(name) / apply_macro(name).\n"
+    "When the intuition plateaus (top estimate stops dropping), a short repeatable "
+    "sequence (a 'macro', e.g. R U R' U') can shuffle pieces to escape it. If you "
+    "find one that helps, SAVE it; on later cubes, list_macros and test_macro to "
+    "reuse it. Building a good macro library makes you faster over time."
+)
+
+# Backwards-compatible default
+SYSTEM_PROMPT = INTUITION_PROMPT
+
+
+def tools_for_mode(mode: str) -> list[dict]:
+    """intuition = rank_moves; blind = no rank_moves; memory = intuition + macros."""
+    if mode == "blind":
+        return [t for t in TOOLS if t["function"]["name"] != "rank_moves"]
+    if mode == "memory":
+        return TOOLS + MACRO_TOOLS
+    return TOOLS
+
+
+def prompt_for_mode(mode: str) -> str:
+    return {"blind": BLIND_PROMPT, "memory": MEMORY_PROMPT}.get(mode, INTUITION_PROMPT)
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +258,17 @@ def dispatch(session: CubeSession, name: str, args: dict) -> dict:
             return session.inverse(args.get("moves", ""))
         if name == "rank_moves":
             return session.rank_moves()
+        if name == "save_macro":
+            return session.save_macro(args.get("name", ""), args.get("moves", ""),
+                                      args.get("note", ""))
+        if name == "list_macros":
+            return session.list_macros()
+        if name == "get_macro":
+            return session.get_macro(args.get("name", ""))
+        if name == "test_macro":
+            return session.test_macro(args.get("name", ""))
+        if name == "apply_macro":
+            return session.apply_macro(args.get("name", ""))
         return {"error": f"unknown tool '{name}'"}
     except MoveParseError as exc:
         return {"error": str(exc)}
@@ -201,11 +301,12 @@ def _fmt_obs(d: dict) -> str:
 
 def run_episode(session: CubeSession, model: str, host: str,
                 max_turns: int = 15, think: bool = False,
-                log=lambda *_: None) -> dict:
+                mode: str = "intuition", log=lambda *_: None) -> dict:
     """Run one solve attempt. Returns a result dict."""
+    tools = tools_for_mode(mode)
     obs = session.observe()
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": prompt_for_mode(mode)},
         {"role": "user", "content":
             "Here is the scrambled cube. Solve it.\n" + _fmt_obs(dict(obs))},
     ]
@@ -218,7 +319,7 @@ def run_episode(session: CubeSession, model: str, host: str,
             break
         turns += 1
         try:
-            msg = ollama_chat(messages, TOOLS, model, host, think=think)
+            msg = ollama_chat(messages, tools, model, host, think=think)
         except Exception as exc:  # noqa: BLE001
             log(f"[turn {turns}] chat error: {exc}")
             return {"solved": False, "turns": turns, "error": str(exc),
@@ -277,6 +378,11 @@ def main() -> None:
     ap.add_argument("--max-turns", type=int, default=15)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--think", action="store_true", help="enable model thinking")
+    ap.add_argument("--mode", choices=["intuition", "blind", "memory"],
+                    default="intuition",
+                    help="intuition = rank_moves; blind = none; memory = + macro store")
+    ap.add_argument("--macro-file", default="runs/llm/macros.json",
+                    help="persistent macro memory path (mode=memory)")
     ap.add_argument("--out", default="", help="optional transcript log file")
     args = ap.parse_args()
 
@@ -288,21 +394,28 @@ def main() -> None:
             logf.write(msg + "\n")
             logf.flush()
 
-    log(f"=== LLM cube agent | model={args.model} host={args.host} "
+    log(f"=== LLM cube agent | model={args.model} mode={args.mode} "
         f"depth={args.depth} episodes={args.episodes} ===")
+    # Shared, persistent macro memory across episodes (memory mode only).
+    memory = MacroMemory(args.macro_file) if args.mode == "memory" else None
+    if memory is not None:
+        log(f"macro memory: {args.macro_file} ({len(memory.macros)} macros loaded)")
+
     results = []
     for ep in range(args.episodes):
-        session = CubeSession(seed=args.seed + ep)
+        session = CubeSession(seed=args.seed + ep, memory=memory)
         obs = session.scramble(args.depth)
         log(f"\n--- episode {ep} | scramble: {obs['scramble']} "
             f"(pieces_solved={obs['pieces_solved']}) ---")
         res = run_episode(session, args.model, args.host,
-                          max_turns=args.max_turns, think=args.think, log=log)
+                          max_turns=args.max_turns, think=args.think,
+                          mode=args.mode, log=log)
         log(f"--- episode {ep} result: {res} ---")
         results.append(res)
 
     n_solved = sum(1 for r in results if r["solved"])
-    log(f"\n=== SUMMARY: solved {n_solved}/{len(results)} | "
+    log(f"\n=== SUMMARY {args.model} mode={args.mode} depth={args.depth}: "
+        f"solved {n_solved}/{len(results)} | "
         f"avg turns {sum(r['turns'] for r in results)/len(results):.1f} | "
         f"avg secs {sum(r['secs'] for r in results)/len(results):.1f} ===")
     if logf:
