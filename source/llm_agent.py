@@ -91,6 +91,18 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "rank_moves",
+            "description": "Learned INTUITION. Returns each possible next move ranked "
+                           "by estimated_moves_to_solve (lower = closer to solved). The "
+                           "FIRST move is the recommended one. would_solve=true means that "
+                           "move solves the cube right now. Use this to choose moves — you "
+                           "cannot read the net reliably, but this intuition can.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 SYSTEM_PROMPT = (
@@ -101,13 +113,19 @@ SYSTEM_PROMPT = (
     "90 deg counter-clockwise (e.g. R'). Valid moves: " + ', '.join(NOTATION) + ".\n\n"
     "The cube is SOLVED when all 20 pieces are home (pieces_solved = 20, every face "
     "one color). Your goal: reach pieces_solved = 20.\n\n"
-    "Tools: observe (see the cube), simulate (test moves on a scratch copy without "
-    "committing), apply (commit moves), inverse (undo a sequence).\n"
-    "IMPORTANT: simulate does NOT change the real cube — it only previews. To make "
-    "real progress you MUST call apply. Strategy: simulate a candidate; if its "
-    "delta_pieces_solved is positive (or would_solve is true), APPLY it to lock in "
-    "the gain; then repeat from the new state. Only apply is scored.\n"
-    "Work step by step. When pieces_solved reaches 20, say SOLVED."
+    "You CANNOT read the net reliably — do not try to reason about colors. Instead "
+    "use the rank_moves INTUITION tool.\n\n"
+    "Tools: rank_moves (ranked next-move suggestions from a learned intuition; lower "
+    "estimated_moves_to_solve = closer to solved; would_solve means it solves now), "
+    "apply (commit moves), simulate (preview without committing), observe, inverse.\n\n"
+    "STRATEGY (follow this loop):\n"
+    "1. Call rank_moves.\n"
+    "2. If any move shows would_solve, apply that move — you win.\n"
+    "3. Otherwise apply the TOP-ranked move (lowest estimate).\n"
+    "4. Repeat. apply is the only tool that changes the real cube.\n"
+    "If the estimate stops improving for several moves (a plateau), try the 2nd or "
+    "3rd ranked move to escape it.\n"
+    "When pieces_solved reaches 20, say SOLVED."
 )
 
 
@@ -149,6 +167,8 @@ def dispatch(session: CubeSession, name: str, args: dict) -> dict:
             return session.simulate(args.get("moves", ""))
         if name == "inverse":
             return session.inverse(args.get("moves", ""))
+        if name == "rank_moves":
+            return session.rank_moves()
         return {"error": f"unknown tool '{name}'"}
     except MoveParseError as exc:
         return {"error": str(exc)}
@@ -158,6 +178,15 @@ def dispatch(session: CubeSession, name: str, args: dict) -> dict:
 
 def _fmt_obs(d: dict) -> str:
     """Compact text form of a tool result (keeps the net readable, drops noise)."""
+    # Special, token-light formatting for the rank_moves intuition tool.
+    if "ranked_moves" in d:
+        rows = d["ranked_moves"][:6]
+        lines = [f"current_estimate={d.get('current_estimate')}  (top moves, lower=better):"]
+        for r in rows:
+            tag = " <-SOLVES" if r.get("would_solve") else ""
+            lines.append(f"  {r['move']:>3}: est={r['estimated_moves_to_solve']} "
+                         f"pieces={r['pieces_solved']}{tag}")
+        return "\n".join(lines)
     net = d.pop("net", None) or d.pop("net_after", None)
     parts = [f"{k}={v}" for k, v in d.items()]
     s = "  ".join(parts)

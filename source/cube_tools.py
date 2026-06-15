@@ -34,8 +34,8 @@ for _d in (str(_SRC), str(_SRC / "cube")):
     if _d not in sys.path:
         sys.path.insert(0, _d)
 
-from state import State, MOVES                 # noqa: E402
-from vis_util import state_to_net, print_net   # noqa: E402
+from state import State, MOVES                          # noqa: E402
+from vis_util import state_to_net, ITOA, U, L, F, R, B, D  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Move notation <-> precomputed State
@@ -126,8 +126,25 @@ def _solved_counts(state: State) -> dict:
 
 
 def render_net(state: State) -> str:
-    """ASCII unfolded-net rendering of a state (the LLM's eyes)."""
-    return print_net(state_to_net(state))
+    """ASCII unfolded-net rendering of a state (the LLM's eyes).
+
+    Non-printing twin of vis_util.print_net (which prints as a side effect).
+    """
+    n = state_to_net(state).tolist()
+
+    def row(face, r):
+        return ' '.join(ITOA[n[face][r][c]] for c in range(3))
+
+    lines = []
+    for r in range(3):
+        lines.append('        ' + row(U, r))
+    lines.append('')
+    for r in range(3):
+        lines.append('  '.join(row(fc, r) for fc in (L, F, R, B)))
+    lines.append('')
+    for r in range(3):
+        lines.append('        ' + row(D, r))
+    return '\n'.join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +240,41 @@ class CubeSession:
         val = self._value(self.state)
         return {"estimated_moves_to_solve": round(val, 2)}
 
+    def rank_moves(self) -> dict:
+        """Intuition tool: for each of the 18 moves, estimate the cost-to-go of the
+        resulting state (lower = closer to solved) and the solved-piece count.
+
+        Returns the moves sorted best-first.  This lets a spatially-blind agent
+        pick a good move without reading the net: greedily apply the top move,
+        repeat.  When stuck in a plateau (top move does not reduce the estimate),
+        that is where a learned macro is needed.
+        """
+        # Ban undoing the last committed move (prevents X X' oscillation).
+        from data import _INV_IDX  # reuse the inverse-index table
+        last = self.history[-1] if self.history else -1
+        undo_idx = _INV_IDX[last] if last >= 0 else -1
+
+        children = [self.state @ _MOVE_STATES[i] for i in range(18)]
+        values = self._value_batch(children)
+        ranked = []
+        for i in range(18):
+            c = _solved_counts(children[i])
+            ranked.append({
+                "move": NOTATION[i],
+                "estimated_moves_to_solve": round(values[i], 2),
+                "pieces_solved": c["pieces_solved"],
+                "would_solve": c["is_solved"],
+                "undoes_last_move": (i == undo_idx),
+            })
+        # would_solve first; then non-undo before undo; then lowest estimate.
+        # (The value head was trained on t>=1 so it does NOT score the solved
+        #  state as 0 — would_solve must override the estimate at the terminal.)
+        ranked.sort(key=lambda r: (not r["would_solve"],
+                                   r["undoes_last_move"],
+                                   r["estimated_moves_to_solve"]))
+        return {"ranked_moves": ranked,
+                "current_estimate": round(self._value(self.state), 2)}
+
     def _value(self, state: State) -> float:
         if self._value_model is None:
             from infer import load_model_auto  # lazy import (loads MLX model)
@@ -242,6 +294,28 @@ class CubeSession:
                      t=None, return_value=True)
         mx.eval(value)
         return float(value.tolist()[0])
+
+    def _value_batch(self, states: list[State]) -> list[float]:
+        """Cost-to-go for many states in one batched forward."""
+        if self._value_model is None:
+            from infer import load_model_auto
+            self._value_model = load_model_auto(
+                str(_SRC.parent / "runs" / "hindsight_not" / "latest.npz")
+            )
+        m = self._value_model
+        n = len(states)
+        cp = mx.array([[int(x) for x in s.corner_positions.tolist()] for s in states], dtype=mx.int32)
+        ct = mx.array([[int(x) for x in s.twist_co.tolist()] for s in states], dtype=mx.int32)
+        ep = mx.array([[int(x) for x in s.edge_positions.tolist()] for s in states], dtype=mx.int32)
+        ef = mx.array([[int(x) for x in s.twist_eo.tolist()] for s in states], dtype=mx.int32)
+        gcp = mx.broadcast_to(mx.arange(8, dtype=mx.int32).reshape(1, 8), (n, 8))
+        gct = mx.zeros((n, 8), dtype=mx.int32)
+        gep = mx.broadcast_to(mx.arange(12, dtype=mx.int32).reshape(1, 12), (n, 12))
+        gef = mx.zeros((n, 12), dtype=mx.int32)
+        _, value = m(goal=(gcp, gct, gep, gef), curr=(cp, ct, ep, ef),
+                     t=None, return_value=True)
+        mx.eval(value)
+        return [float(v) for v in value.tolist()]
 
 
 # ---------------------------------------------------------------------------
