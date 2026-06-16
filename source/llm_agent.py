@@ -183,12 +183,28 @@ INTUITION_PROMPT = _COMMON + (
 )
 
 BLIND_PROMPT = _COMMON + (
-    "\nTools: observe (see the net), simulate (preview moves on a scratch copy "
-    "without committing), apply (commit moves), inverse (undo a sequence).\n"
+    "\nHOW THE CUBE WORKS (basics):\n"
+    "- The cube has 6 faces. The observation shows them as colors: W=white, "
+    "Y=yellow, G=green, B=blue, R=red, O=orange.\n"
+    "- Each face has a fixed CENTER that never moves; the center is that face's "
+    "target color. The cube is SOLVED when every face is one solid color matching "
+    "its center (white up, yellow down, green front, blue back, red right, orange "
+    "left).\n"
+    "- A move turns ONE face 90 degrees. It only moves the stickers on that face "
+    "and the strips touching it; centers stay put. So pick the move that brings a "
+    "sticker toward the face whose center matches its color.\n"
+    "- Order matters: R then U is NOT the same as U then R.\n"
+    "- Every move is undone by its inverse: R then R' changes nothing; doing the "
+    "same quarter-turn 4 times returns to start. Use this to back out of a bad line.\n"
+    "- To place one piece you often must briefly disturb others and then restore "
+    "them. Short repeatable sequences (like R U R' U') cycle a few pieces while "
+    "leaving most intact.\n\n"
+    "Tools: observe (see the colored net + how many stickers per face match its "
+    "center), simulate (preview moves on a scratch copy without committing; shows "
+    "delta_pieces_solved), apply (commit moves), inverse (undo a sequence).\n"
     "simulate does NOT change the real cube — only apply does. Strategy: read the "
-    "cube, find moves that increase pieces_solved (test with simulate, "
-    "delta_pieces_solved > 0), then APPLY them. Repeat.\n"
-    "When pieces_solved reaches 20, say SOLVED."
+    "cube, use simulate to find moves with delta_pieces_solved > 0, APPLY them, "
+    "repeat. When pieces_solved reaches 20, say SOLVED."
 )
 
 MEMORY_PROMPT = INTUITION_PROMPT + (

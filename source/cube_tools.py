@@ -126,26 +126,57 @@ def _solved_counts(state: State) -> dict:
     }
 
 
-def render_net(state: State) -> str:
+# Standard Western color scheme: each face index -> a color letter.
+# U=White, D=Yellow, F=Green, B=Blue, R=Red, L=Orange.
+_COLOR = {F: 'G', R: 'R', L: 'O', B: 'B', U: 'W', D: 'Y'}
+_FACE_LABEL = {U: 'U(top)', D: 'D(bottom)', F: 'F(front)',
+               B: 'B(back)', L: 'L(left)', R: 'R(right)'}
+
+
+def render_net(state: State, color: bool = False) -> str:
     """ASCII unfolded-net rendering of a state (the LLM's eyes).
 
+    color=False -> cells show the home-face letter (U/D/L/R/F/B).
+    color=True  -> cells show the standard color letter (W/Y/G/B/R/O), which is
+                   how cubes are usually described and easier for an LLM to read.
     Non-printing twin of vis_util.print_net (which prints as a side effect).
     """
     n = state_to_net(state).tolist()
+    cell = (lambda v: _COLOR[v]) if color else (lambda v: ITOA[v])
 
     def row(face, r):
-        return ' '.join(ITOA[n[face][r][c]] for c in range(3))
+        return ' '.join(cell(n[face][r][c]) for c in range(3))
 
     lines = []
     for r in range(3):
-        lines.append('        ' + row(U, r))
+        lines.append('          ' + row(U, r))
     lines.append('')
     for r in range(3):
         lines.append('  '.join(row(fc, r) for fc in (L, F, R, B)))
     lines.append('')
     for r in range(3):
-        lines.append('        ' + row(D, r))
+        lines.append('          ' + row(D, r))
     return '\n'.join(lines)
+
+
+def face_progress(state: State) -> dict:
+    """For each face, how many of its 9 stickers already match its center color
+    (centers are fixed, so this is the face's 'how solid is this color' score)."""
+    n = state_to_net(state).tolist()
+    out = {}
+    for fc in (U, D, F, B, L, R):
+        match = sum(1 for r in range(3) for c in range(3) if n[fc][r][c] == fc)
+        out[_FACE_LABEL[fc]] = match  # 0..9 (center always counts)
+    return out
+
+
+def readable_observation(state: State) -> str:
+    """A cube-literate observation: colored net + per-face completeness."""
+    net = render_net(state, color=True)
+    fp = face_progress(state)
+    prog = '  '.join(f"{k.split('(')[0]}:{v}/9" for k, v in fp.items())
+    return (net + "\n"
+            "faces matching their center color: " + prog)
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +287,7 @@ class CubeSession:
         after = _solved_counts(scratch)
         return {
             "moves": ' '.join(NOTATION[i] for i in idxs),
-            "net_after": render_net(scratch),
+            "net_after": readable_observation(scratch),
             "pieces_solved_before": before["pieces_solved"],
             "pieces_solved_after": after["pieces_solved"],
             "delta_pieces_solved": after["pieces_solved"] - before["pieces_solved"],
@@ -268,7 +299,7 @@ class CubeSession:
     def observe(self) -> dict:
         c = _solved_counts(self.state)
         return {
-            "net": render_net(self.state),
+            "net": readable_observation(self.state),
             "corners_solved": c["corners_solved"],
             "edges_solved": c["edges_solved"],
             "pieces_solved": c["pieces_solved"],
