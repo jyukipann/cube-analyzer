@@ -52,12 +52,25 @@ def random_solve(seed: int, depth: int) -> bool:
 
 
 def greedy_solve(seed: int, depth: int) -> bool:
+    """Perfect greedy on the learned value (the good heuristic) = the ceiling."""
     s = CubeSession(seed=seed)
     s.scramble(depth)
     for _ in range(_budget(depth)):
         if s.observe()["is_solved"]:
             return True
         best = s.rank_moves()["ranked_moves"][0]
+        s.apply(best["move"])
+    return s.observe()["is_solved"]
+
+
+def greedy_pieces_solve(seed: int, depth: int) -> bool:
+    """Perfect greedy on pieces_solved (the bad heuristic the blind agent has)."""
+    s = CubeSession(seed=seed)
+    s.scramble(depth)
+    for _ in range(_budget(depth)):
+        if s.observe()["is_solved"]:
+            return True
+        best = s.rank_moves_pieces()["ranked_moves"][0]
         s.apply(best["move"])
     return s.observe()["is_solved"]
 
@@ -85,11 +98,12 @@ def main() -> None:
             logf.write(m + "\n"); logf.flush()
 
     log(f"=== deterministic baselines | n={args.n} depths={depths} ===")
-    log(f"{'depth':>5} {'random':>8} {'greedy':>8}")
+    log(f"{'depth':>5} {'random':>8} {'gr_pieces':>10} {'gr_value':>9}")
     for d in depths:
         r = sum(random_solve(seed, d) for seed in range(args.n))
-        g = sum(greedy_solve(seed, d) for seed in range(args.n))
-        log(f"{d:>5} {r/args.n:>8.2f} {g/args.n:>8.2f}")
+        gp = sum(greedy_pieces_solve(seed, d) for seed in range(args.n))
+        gv = sum(greedy_solve(seed, d) for seed in range(args.n))
+        log(f"{d:>5} {r/args.n:>8.2f} {gp/args.n:>10.2f} {gv/args.n:>9.2f}")
     if logf:
         logf.close()
 

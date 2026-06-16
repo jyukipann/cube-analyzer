@@ -392,6 +392,29 @@ class CubeSession:
         return {"ranked_moves": ranked,
                 "current_estimate": round(self._value(self.state), 2)}
 
+    def rank_moves_pieces(self) -> dict:
+        """Ablation 'bad-heuristic' twin of rank_moves: same forward search over
+        the 18 moves, but ranked by immediate pieces_solved (a myopic, poor
+        heuristic) instead of the learned cost-to-go.  Isolates whether the win
+        comes from lookahead (search) or from the QUALITY of the heuristic."""
+        from data import _INV_IDX
+        last = self.history[-1] if self.history else -1
+        undo_idx = _INV_IDX[last] if last >= 0 else -1
+        ranked = []
+        for i in range(18):
+            c = _solved_counts(self.state @ _MOVE_STATES[i])
+            ranked.append({
+                "move": NOTATION[i],
+                "pieces_solved": c["pieces_solved"],
+                "would_solve": c["is_solved"],
+                "undoes_last_move": (i == undo_idx),
+            })
+        ranked.sort(key=lambda r: (not r["would_solve"],
+                                   r["undoes_last_move"],
+                                   -r["pieces_solved"]))
+        return {"ranked_moves": ranked,
+                "current_pieces_solved": _solved_counts(self.state)["pieces_solved"]}
+
     def _value(self, state: State) -> float:
         if self._value_model is None:
             from infer import load_model_auto  # lazy import (loads MLX model)

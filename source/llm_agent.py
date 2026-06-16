@@ -222,15 +222,17 @@ SYSTEM_PROMPT = INTUITION_PROMPT
 
 
 def tools_for_mode(mode: str) -> list[dict]:
-    """intuition = rank_moves; blind = no rank_moves; memory = intuition + macros."""
+    """intuition/pieces = rank_moves; blind = none; memory = intuition + macros."""
     if mode == "blind":
         return [t for t in TOOLS if t["function"]["name"] != "rank_moves"]
     if mode == "memory":
         return TOOLS + MACRO_TOOLS
-    return TOOLS
+    return TOOLS  # intuition, pieces
 
 
 def prompt_for_mode(mode: str) -> str:
+    # 'pieces' uses the same prompt as intuition — the agent is not told the
+    # ranking heuristic is worse; only the harness swaps the underlying signal.
     return {"blind": BLIND_PROMPT, "memory": MEMORY_PROMPT}.get(mode, INTUITION_PROMPT)
 
 
@@ -262,7 +264,7 @@ def ollama_chat(messages: list[dict], tools: list[dict], model: str,
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
-def dispatch(session: CubeSession, name: str, args: dict) -> dict:
+def dispatch(session: CubeSession, name: str, args: dict, mode: str = "intuition") -> dict:
     try:
         if name == "observe":
             return session.observe()
@@ -273,7 +275,8 @@ def dispatch(session: CubeSession, name: str, args: dict) -> dict:
         if name == "inverse":
             return session.inverse(args.get("moves", ""))
         if name == "rank_moves":
-            return session.rank_moves()
+            # 'pieces' ablation: same tool name, worse (pieces-based) heuristic.
+            return session.rank_moves_pieces() if mode == "pieces" else session.rank_moves()
         if name == "save_macro":
             return session.save_macro(args.get("name", ""), args.get("moves", ""),
                                       args.get("note", ""))
@@ -297,11 +300,18 @@ def _fmt_obs(d: dict) -> str:
     # Special, token-light formatting for the rank_moves intuition tool.
     if "ranked_moves" in d:
         rows = d["ranked_moves"][:6]
-        lines = [f"current_estimate={d.get('current_estimate')}  (top moves, lower=better):"]
+        if "current_estimate" in d:
+            lines = [f"current_estimate={d['current_estimate']} (top moves, lower est=better):"]
+        else:
+            lines = [f"current_pieces_solved={d.get('current_pieces_solved')} "
+                     f"(top moves, higher pieces=better):"]
         for r in rows:
             tag = " <-SOLVES" if r.get("would_solve") else ""
-            lines.append(f"  {r['move']:>3}: est={r['estimated_moves_to_solve']} "
-                         f"pieces={r['pieces_solved']}{tag}")
+            if "estimated_moves_to_solve" in r:
+                lines.append(f"  {r['move']:>3}: est={r['estimated_moves_to_solve']} "
+                             f"pieces={r['pieces_solved']}{tag}")
+            else:
+                lines.append(f"  {r['move']:>3}: pieces={r['pieces_solved']}{tag}")
         return "\n".join(lines)
     net = d.pop("net", None) or d.pop("net_after", None)
     parts = [f"{k}={v}" for k, v in d.items()]
@@ -329,6 +339,11 @@ def run_episode(session: CubeSession, model: str, host: str,
 
     turns = 0
     tool_calls_made = 0
+    # rank-1 adherence instrumentation: of the apply calls that immediately
+    # follow a rank_moves call, how many applied the rank-1 (top) move?
+    last_rank1 = None
+    applies_tracked = 0
+    applies_rank1 = 0
     t0 = time.time()
     while turns < max_turns:
         if session.observe()["is_solved"]:
@@ -365,8 +380,17 @@ def run_episode(session: CubeSession, model: str, host: str,
                     args = json.loads(args)
                 except Exception:  # noqa: BLE001
                     args = {"moves": args}
-            result = dispatch(session, name, args)
+            result = dispatch(session, name, args, mode=mode)
             tool_calls_made += 1
+            # adherence tracking
+            if name == "rank_moves" and result.get("ranked_moves"):
+                last_rank1 = result["ranked_moves"][0]["move"]
+            elif name == "apply" and last_rank1 is not None:
+                toks = str(args.get("moves", "")).strip().upper().replace("’", "'").split()
+                applies_tracked += 1
+                if toks and toks[0] == last_rank1.upper():
+                    applies_rank1 += 1
+                last_rank1 = None  # only score the apply immediately after a rank
             log(f"[turn {turns}] tool {name}({args}) -> "
                 f"pieces_solved={result.get('pieces_solved', result.get('pieces_solved_after','?'))}"
                 f"{' SOLVED' if result.get('is_solved') else ''}")
@@ -382,6 +406,8 @@ def run_episode(session: CubeSession, model: str, host: str,
         "tool_calls": tool_calls_made,
         "moves_made": len(session.history),
         "secs": round(time.time() - t0, 1),
+        "applies_tracked": applies_tracked,
+        "applies_rank1": applies_rank1,
     }
 
 
@@ -394,9 +420,12 @@ def main() -> None:
     ap.add_argument("--max-turns", type=int, default=15)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--think", action="store_true", help="enable model thinking")
-    ap.add_argument("--mode", choices=["intuition", "blind", "memory"],
+    ap.add_argument("--mode",
+                    choices=["intuition", "blind", "memory", "pieces"],
                     default="intuition",
-                    help="intuition = rank_moves; blind = none; memory = + macro store")
+                    help="intuition = value rank_moves; blind = none; "
+                         "memory = + macro store; pieces = rank_moves by pieces_solved "
+                         "(bad-heuristic ablation)")
     ap.add_argument("--macro-file", default="runs/llm/macros.json",
                     help="persistent macro memory path (mode=memory)")
     ap.add_argument("--out", default="", help="optional transcript log file")
@@ -430,10 +459,14 @@ def main() -> None:
         results.append(res)
 
     n_solved = sum(1 for r in results if r["solved"])
+    tracked = sum(r.get("applies_tracked", 0) for r in results)
+    rank1 = sum(r.get("applies_rank1", 0) for r in results)
+    adh = f"{rank1/tracked:.2f}" if tracked else "n/a"
     log(f"\n=== SUMMARY {args.model} mode={args.mode} depth={args.depth}: "
         f"solved {n_solved}/{len(results)} | "
         f"avg turns {sum(r['turns'] for r in results)/len(results):.1f} | "
-        f"avg secs {sum(r['secs'] for r in results)/len(results):.1f} ===")
+        f"avg secs {sum(r['secs'] for r in results)/len(results):.1f} | "
+        f"rank1_adherence {adh} ({rank1}/{tracked}) ===")
     if logf:
         logf.close()
 
