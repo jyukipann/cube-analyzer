@@ -198,28 +198,27 @@ qwen3.5:9b（同じ直感あり, N=15）の結果を示す。
 
 ## 7. 関連研究と本稿の位置づけ
 
-学習した「残り手数の見積もり（cost-to-go）」でキューブを解く話としては、DeepCubeA [1] がある。価値反復でcost-to-goを学習し、重み付きA*と組み合わせてキューブを100%解く（うち60.3%は最短）。今回の擬似直感はこのcost-to-goの系譜にあるが、使い方が違う。DeepCubeAは価値を探索（A*）のヒューリスティックとして使うのに対し、ここでは同じ種類の価値をLLMに手渡す直感ツールとして使い、弱い推論器がそれをどう扱うかを見ている。ちなみに、価値反復で得た「より正確な」価値をA*的に使うと、予備実験では探索がかえって壊れた。ヒューリスティックの良し悪しは下流の使い方で変わる、という今回の論旨と整合する。
+学習した「残り手数の見積もり（cost-to-go）」でキューブを解く話としては、DeepCubeA[^1] がある。価値反復でcost-to-goを学習し、重み付きA*と組み合わせてキューブを100%解く（うち60.3%は最短）。今回の擬似直感はこのcost-to-goの系譜にあるが、使い方が違う。DeepCubeAは価値を探索（A*）のヒューリスティックとして使うのに対し、ここでは同じ種類の価値をLLMに手渡す直感ツールとして使い、弱い推論器がそれをどう扱うかを見ている。ちなみに、価値反復で得た「より正確な」価値をA*的に使うと、予備実験では探索がかえって壊れた。ヒューリスティックの良し悪しは下流の使い方で変わる、という今回の論旨と整合する。
 
-近時のベンチマークは、LLMやMLLMがキューブ系タスクで苦戦することを独立に示している。Cube Bench [2] はMLLMの空間・逐次推論を5技能に分解し、深さとともに精度が急落すること、一度つまずくと立て直せないこと、面の再構成が得意でも手の選択や多段実行が得意とは限らないことを報告している。CubeBench [3] は対話的・長距離・部分観測の設定で、長距離タスクの正答率が一律0.00%になると示す。これらは今回の所見を外から裏づける（知覚ができても先読みは別、4.2／深さで急落し立て直せない、4.3）。今回はそこに介入を足し、擬似直感を与えてボトルネックを分解し、言うとおり率で仕組みを定量化した。
+近時のベンチマークは、LLMやMLLMがキューブ系タスクで苦戦することを独立に示している。Cube Bench[^2] はMLLMの空間・逐次推論を5技能に分解し、深さとともに精度が急落すること、一度つまずくと立て直せないこと、面の再構成が得意でも手の選択や多段実行が得意とは限らないことを報告している。CubeBench[^3] は対話的・長距離・部分観測の設定で、長距離タスクの正答率が一律0.00%になると示す。これらは今回の所見を外から裏づける（知覚ができても先読みは別、4.2／深さで急落し立て直せない、4.3）。今回はそこに介入を足し、擬似直感を与えてボトルネックを分解し、言うとおり率で仕組みを定量化した。
 
-学習した価値でLLMの探索を誘導する流れも広い。LATS [4] は推論・行動・計画を木探索で統一し価値で枝を選ぶ。大きいモデルをfine-tuneせず軽い補助価値で行動を誘導する手法もある [5]（今回の「別に学習した小さな価値を外部ツールとして渡す」構図に近い）。木探索と報酬設計の整理はサーベイ [6] にまとまっている。今回の差分は、対象が大きいモデルでなく小さいLLMであること、検証が厳密な環境であること、そして同じ形のツールでヒューリスティックだけを入れ替える対照によって「効いているのは先読みでなくヒューリスティックの質」と分離したことにある。
+学習した価値でLLMの探索を誘導する流れも広い。LATS[^4] は推論・行動・計画を木探索で統一し価値で枝を選ぶ。大きいモデルをfine-tuneせず軽い補助価値で行動を誘導する手法もある[^5]（今回の「別に学習した小さな価値を外部ツールとして渡す」構図に近い）。木探索と報酬設計の整理はサーベイ[^6] にまとまっている。今回の差分は、対象が大きいモデルでなく小さいLLMであること、検証が厳密な環境であること、そして同じ形のツールでヒューリスティックだけを入れ替える対照によって「効いているのは先読みでなくヒューリスティックの質」と分離したことにある。
 
-6章のplan→execute→reflectループは、ReAct [7]（推論と行動を交互に）とReflexion [8]（環境からのフィードバックを言葉にして記憶に貯め、次の回の判断を改善する）の系譜にある。今回の記憶の不発（4.5）を破るには、この自己反省と記憶が点火点になりうると考えている。
+6章のplan→execute→reflectループは、ReAct[^7]（推論と行動を交互に）とReflexion[^8]（環境からのフィードバックを言葉にして記憶に貯め、次の回の判断を改善する）の系譜にある。今回の記憶の不発（4.5）を破るには、この自己反省と記憶が点火点になりうると考えている。
 
-同時期の実践例として、0xL1C10G氏 [9] は最前線の大きいモデル（Claude Opus 4.8）にMCPツールでキューブを解かせ、Kociembaソルバーを使えば5手・約1.5分、禁じて自力なら110手・約3時間と報告している。安定して解けたのは毎手の観測で誤りに気づけたからで、確実な状態確認と巻き戻しが要ると結論づけている。今回とは相補的で、盤面をツールが持ちモデルが毎手観測する設計は共通する（氏の知見は今回の巻き戻しやプレビューを裏づける）。違いは、今回が大きいモデルでなく小さいLLMを対象にし、完全ソルバーと無支援の中間に擬似直感を置いてボトルネックを分解・定量化した点にある。
+同時期の実践例として、0xL1C10G氏[^9] は最前線の大きいモデル（Claude Opus 4.8）にMCPツールでキューブを解かせ、Kociembaソルバーを使えば5手・約1.5分、禁じて自力なら110手・約3時間と報告している。安定して解けたのは毎手の観測で誤りに気づけたからで、確実な状態確認と巻き戻しが要ると結論づけている。今回とは相補的で、盤面をツールが持ちモデルが毎手観測する設計は共通する（氏の知見は今回の巻き戻しやプレビューを裏づける）。違いは、今回が大きいモデルでなく小さいLLMを対象にし、完全ソルバーと無支援の中間に擬似直感を置いてボトルネックを分解・定量化した点にある。
 
-通してみると、強いモデルは自前の推論と確実な状態管理で押し切れる [9]、キューブはLLMの空間・長距離計画の弱点を露わにする [2,3]、学習した価値は探索の良いヒューリスティックになる [1,4,5]、という三つが分かる。今回はこれらをつなぎ、弱いモデルには外部化した直感（良いヒューリスティック）を渡すと浅いところは解けるが、深いところでは直感を信じきる力が次のボトルネックになり、それは規模で改善する、という像を ablation study で示した。
+通してみると、強いモデルは自前の推論と確実な状態管理で押し切れる[^9]、キューブはLLMの空間・長距離計画の弱点を露わにする[^2][^3]、学習した価値は探索の良いヒューリスティックになる[^1][^4][^5]、という三つが分かる。今回はこれらをつなぎ、弱いモデルには外部化した直感（良いヒューリスティック）を渡すと浅いところは解けるが、深いところでは直感を信じきる力が次のボトルネックになり、それは規模で改善する、という像を ablation study で示した。
 
-### 参考文献
-- [1] Agostinelli, McAleer, Shmakov, Baldi. "Solving the Rubik's cube with deep reinforcement learning and search." *Nature Machine Intelligence*, 2019. https://www.nature.com/articles/s42256-019-0070-z
-- [2] "Cube Bench: A Benchmark for Spatial Visual Reasoning in MLLMs." arXiv:2512.20595. https://arxiv.org/abs/2512.20595
-- [3] "CubeBench: Diagnosing Interactive, Long-Horizon Spatial Reasoning Under Partial Observations." arXiv:2512.23328. https://arxiv.org/abs/2512.23328
-- [4] Zhou et al. "Language Agent Tree Search Unifies Reasoning, Acting, and Planning in Language Models." arXiv:2310.04406. https://arxiv.org/abs/2310.04406
-- [5] "Planning without Search: Refining Frontier LLMs with Offline Goal-Conditioned RL." arXiv:2505.18098. https://arxiv.org/abs/2505.18098
-- [6] "Unifying Tree Search Algorithm and Reward Design for LLM Reasoning: A Survey." arXiv:2510.09988. https://arxiv.org/abs/2510.09988
-- [7] Yao et al. "ReAct: Synergizing Reasoning and Acting in Language Models." arXiv:2210.03629. https://arxiv.org/abs/2210.03629
-- [8] Shinn et al. "Reflexion: Language Agents with Verbal Reinforcement Learning." arXiv:2303.11366. https://arxiv.org/abs/2303.11366
-- [9] 0xL1C10G「AI にルービックキューブを解かせて見えた、ソルバーと自力推論の違い」Zenn, 2026-06-16. https://zenn.dev/0xliclog/articles/fdbe9fc55c1406
+[^1]: Agostinelli, McAleer, Shmakov, Baldi. "Solving the Rubik's cube with deep reinforcement learning and search." *Nature Machine Intelligence*, 2019. https://www.nature.com/articles/s42256-019-0070-z
+[^2]: "Cube Bench: A Benchmark for Spatial Visual Reasoning in MLLMs." arXiv:2512.20595. https://arxiv.org/abs/2512.20595
+[^3]: "CubeBench: Diagnosing Interactive, Long-Horizon Spatial Reasoning Under Partial Observations." arXiv:2512.23328. https://arxiv.org/abs/2512.23328
+[^4]: Zhou et al. "Language Agent Tree Search Unifies Reasoning, Acting, and Planning in Language Models." arXiv:2310.04406. https://arxiv.org/abs/2310.04406
+[^5]: "Planning without Search: Refining Frontier LLMs with Offline Goal-Conditioned RL." arXiv:2505.18098. https://arxiv.org/abs/2505.18098
+[^6]: "Unifying Tree Search Algorithm and Reward Design for LLM Reasoning: A Survey." arXiv:2510.09988. https://arxiv.org/abs/2510.09988
+[^7]: Yao et al. "ReAct: Synergizing Reasoning and Acting in Language Models." arXiv:2210.03629. https://arxiv.org/abs/2210.03629
+[^8]: Shinn et al. "Reflexion: Language Agents with Verbal Reinforcement Learning." arXiv:2303.11366. https://arxiv.org/abs/2303.11366
+[^9]: 0xL1C10G「AI にルービックキューブを解かせて見えた、ソルバーと自力推論の違い」Zenn, 2026-06-16. https://zenn.dev/0xliclog/articles/fdbe9fc55c1406
 
 ---
 
