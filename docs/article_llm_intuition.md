@@ -209,6 +209,13 @@ qwen3.5:9b（同じ直感あり, N=15）の結果を示す。
 
 ### 付録：再現
 
+コード一式は GitHub に置いてある: [jyukipann/cube-analyzer](https://github.com/jyukipann/cube-analyzer)。主なファイルは次のとおり。
+
+- ツールkernel（観測・直感・記憶）: `source/cube_tools.py`
+- エージェント（Ollama駆動）: `source/llm_agent.py`
+- 決定論ベースライン（床/天井）: `source/ablation_baselines.py`
+- この記事: `docs/article_llm_intuition.md`
+
 ```bash
 # 床/天井（random / 悪ヒューリスティック / 良ヒューリスティック）
 uv run python source/ablation_baselines.py --n 200 --depths 1-12
