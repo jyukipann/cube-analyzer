@@ -351,6 +351,19 @@ class CubeSession:
         out["macro"] = name
         return out
 
+    def rollback(self, n: int = 1) -> dict:
+        """Undo the last n committed solving moves by replaying from the scrambled state."""
+        n = max(0, min(int(n), len(self.history)))
+        if n == 0:
+            obs = self.observe()
+            obs["rolled_back"] = 0
+            return obs
+        self.history = self.history[:-n]
+        self.state = _apply_indices(State(), self.scramble_moves + self.history)
+        obs = self.observe()
+        obs["rolled_back"] = n
+        return obs
+
     # -- learned intuition (M3) ---------------------------------------------
     def distance(self) -> dict:
         """Learned cost-to-go estimate for the current state (lower = closer)."""

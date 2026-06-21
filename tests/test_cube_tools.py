@@ -86,6 +86,50 @@ def test_macro_save_rejects_bad_moves(tmp_path):
         mem.save("bad", "R X U")
 
 
+def test_rollback_undoes_moves():
+    s = CubeSession(seed=5)
+    s.scramble(5)
+    before = s.observe()
+    s.apply("R U R'")
+    assert s.observe()["net"] != before["net"]
+    r = s.rollback(3)
+    assert r["rolled_back"] == 3
+    assert s.observe()["net"] == before["net"]
+    assert len(s.history) == 0
+
+
+def test_rollback_partial():
+    s = CubeSession(seed=6)
+    s.scramble(4)
+    s.apply("R")
+    s.apply("U")
+    mid = s.observe()["pieces_solved"]
+    s.apply("F")
+    s.rollback(1)
+    # should be back to the state after R U
+    assert s.observe()["pieces_solved"] == mid
+    assert len(s.history) == 2
+
+
+def test_rollback_zero_is_noop():
+    s = CubeSession(seed=9)
+    s.scramble(3)
+    s.apply("R U")
+    before = s.observe()["net"]
+    r = s.rollback(0)
+    assert r["rolled_back"] == 0
+    assert s.observe()["net"] == before
+
+
+def test_rollback_clamps_to_history():
+    s = CubeSession(seed=11)
+    s.scramble(3)
+    s.apply("R")
+    r = s.rollback(999)  # should clamp to 1
+    assert r["rolled_back"] == 1
+    assert len(s.history) == 0
+
+
 def test_apply_macro_matches_raw_moves(tmp_path):
     from cube_tools import MacroMemory
     mem = MacroMemory(str(tmp_path / "m.json"))
