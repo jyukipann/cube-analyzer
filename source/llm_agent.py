@@ -291,7 +291,7 @@ def prompt_for_mode(mode: str) -> str:
 # ---------------------------------------------------------------------------
 
 def ollama_chat(messages: list[dict], tools: list[dict], model: str,
-                host: str, think: bool = False, timeout: int = 600) -> dict:
+                host: str, think: bool = False, timeout: int = 1200) -> dict:
     """One non-streaming /api/chat call. Returns the assistant message dict."""
     url = f"http://{host}/api/chat"
     payload = {
