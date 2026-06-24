@@ -105,6 +105,25 @@ TOOLS = [
     },
 ]
 
+ROLLBACK_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "rollback",
+        "description": "Undo the last N committed moves (default 1). "
+                       "Use during REFLECT when rank_moves shows the estimate did NOT "
+                       "improve (new estimate >= old estimate) after your last apply. "
+                       "rollback only undoes your solving moves, not the scramble.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "n": {"type": "integer",
+                      "description": "number of moves to undo (default 1)"},
+            },
+            "required": [],
+        },
+    },
+}
+
 # Macro-memory tools (M2). Appended to the intuition tools in 'memory' mode.
 MACRO_TOOLS = [
     {
@@ -207,6 +226,32 @@ BLIND_PROMPT = _COMMON + (
     "repeat. When pieces_solved reaches 20, say SOLVED."
 )
 
+PER_PROMPT = _COMMON + (
+    "\nYou CANNOT read the net reliably — do not reason about colors. "
+    "Use rank_moves (INTUITION) and the strict PLAN → EXECUTE → REFLECT cycle below.\n"
+    "\nTools: rank_moves, apply, rollback(n), simulate, observe, inverse, "
+    "save_macro(name, moves, note).\n"
+    "\n=== CYCLE: PLAN → EXECUTE → REFLECT ===\n"
+    "\nPLAN:\n"
+    "1. Call rank_moves. Record the current_estimate and the top 3 moves.\n"
+    "   If any move shows would_solve=true, apply it immediately.\n"
+    "\nEXECUTE:\n"
+    "2. Apply the top-ranked move.\n"
+    "\nREFLECT:\n"
+    "3. Call rank_moves again. Compare new current_estimate to the one from step 1.\n"
+    "   - new < old (improved): good. Go back to PLAN.\n"
+    "   - new >= old (plateau or worse): call rollback(1), then revisit step 1 and "
+    "try the 2nd-best move instead.\n"
+    "   - A 2-4 move sequence dropped the estimate by 2 or more: "
+    "call save_macro(name, moves, note) to remember it for future cubes.\n"
+    "\nKEY RULES:\n"
+    "- ALWAYS call rank_moves after each apply — that is your REFLECT.\n"
+    "- rollback only undoes YOUR solving moves (not the original scramble).\n"
+    "- If you rolled back to a state you already tried, switch to the 2nd-best move.\n"
+    "- Do not apply a move you just rolled back.\n"
+    "When pieces_solved reaches 20, say SOLVED.\n"
+)
+
 MEMORY_PROMPT = INTUITION_PROMPT + (
     "\n\nYou ALSO have a persistent macro memory shared across cubes:\n"
     "- save_macro(name, moves, note): remember a useful short sequence.\n"
@@ -222,18 +267,23 @@ SYSTEM_PROMPT = INTUITION_PROMPT
 
 
 def tools_for_mode(mode: str) -> list[dict]:
-    """intuition/pieces = rank_moves; blind = none; memory = intuition + macros."""
+    """intuition/pieces = rank_moves; blind = none; memory = intuition + macros;
+    per = intuition + rollback + save_macro."""
     if mode == "blind":
         return [t for t in TOOLS if t["function"]["name"] != "rank_moves"]
     if mode == "memory":
         return TOOLS + MACRO_TOOLS
+    if mode == "per":
+        save_macro = [t for t in MACRO_TOOLS if t["function"]["name"] == "save_macro"]
+        return TOOLS + [ROLLBACK_TOOL] + save_macro
     return TOOLS  # intuition, pieces
 
 
 def prompt_for_mode(mode: str) -> str:
     # 'pieces' uses the same prompt as intuition — the agent is not told the
     # ranking heuristic is worse; only the harness swaps the underlying signal.
-    return {"blind": BLIND_PROMPT, "memory": MEMORY_PROMPT}.get(mode, INTUITION_PROMPT)
+    return {"blind": BLIND_PROMPT, "memory": MEMORY_PROMPT,
+            "per": PER_PROMPT}.get(mode, INTUITION_PROMPT)
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +291,7 @@ def prompt_for_mode(mode: str) -> str:
 # ---------------------------------------------------------------------------
 
 def ollama_chat(messages: list[dict], tools: list[dict], model: str,
-                host: str, think: bool = False, timeout: int = 600) -> dict:
+                host: str, think: bool = False, timeout: int = 1200) -> dict:
     """One non-streaming /api/chat call. Returns the assistant message dict."""
     url = f"http://{host}/api/chat"
     payload = {
@@ -288,6 +338,8 @@ def dispatch(session: CubeSession, name: str, args: dict, mode: str = "intuition
             return session.test_macro(args.get("name", ""))
         if name == "apply_macro":
             return session.apply_macro(args.get("name", ""))
+        if name == "rollback":
+            return session.rollback(int(args.get("n", 1)))
         return {"error": f"unknown tool '{name}'"}
     except MoveParseError as exc:
         return {"error": str(exc)}
@@ -344,6 +396,7 @@ def run_episode(session: CubeSession, model: str, host: str,
     last_rank1 = None
     applies_tracked = 0
     applies_rank1 = 0
+    rollbacks = 0
     t0 = time.time()
     while turns < max_turns:
         if session.observe()["is_solved"]:
@@ -386,11 +439,13 @@ def run_episode(session: CubeSession, model: str, host: str,
             if name == "rank_moves" and result.get("ranked_moves"):
                 last_rank1 = result["ranked_moves"][0]["move"]
             elif name == "apply" and last_rank1 is not None:
-                toks = str(args.get("moves", "")).strip().upper().replace("’", "'").split()
+                toks = str(args.get("moves", "")).strip().upper().replace("’", "’").split()
                 applies_tracked += 1
                 if toks and toks[0] == last_rank1.upper():
                     applies_rank1 += 1
                 last_rank1 = None  # only score the apply immediately after a rank
+            elif name == "rollback":
+                rollbacks += 1
             log(f"[turn {turns}] tool {name}({args}) -> "
                 f"pieces_solved={result.get('pieces_solved', result.get('pieces_solved_after','?'))}"
                 f"{' SOLVED' if result.get('is_solved') else ''}")
@@ -408,6 +463,7 @@ def run_episode(session: CubeSession, model: str, host: str,
         "secs": round(time.time() - t0, 1),
         "applies_tracked": applies_tracked,
         "applies_rank1": applies_rank1,
+        "rollbacks": rollbacks,
     }
 
 
@@ -421,11 +477,11 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--think", action="store_true", help="enable model thinking")
     ap.add_argument("--mode",
-                    choices=["intuition", "blind", "memory", "pieces"],
+                    choices=["intuition", "blind", "memory", "pieces", "per"],
                     default="intuition",
                     help="intuition = value rank_moves; blind = none; "
                          "memory = + macro store; pieces = rank_moves by pieces_solved "
-                         "(bad-heuristic ablation)")
+                         "(bad-heuristic ablation); per = plan→execute→reflect with rollback")
     ap.add_argument("--macro-file", default="runs/llm/macros.json",
                     help="persistent macro memory path (mode=memory)")
     ap.add_argument("--out", default="", help="optional transcript log file")
@@ -462,11 +518,13 @@ def main() -> None:
     tracked = sum(r.get("applies_tracked", 0) for r in results)
     rank1 = sum(r.get("applies_rank1", 0) for r in results)
     adh = f"{rank1/tracked:.2f}" if tracked else "n/a"
+    total_rollbacks = sum(r.get("rollbacks", 0) for r in results)
     log(f"\n=== SUMMARY {args.model} mode={args.mode} depth={args.depth}: "
         f"solved {n_solved}/{len(results)} | "
         f"avg turns {sum(r['turns'] for r in results)/len(results):.1f} | "
         f"avg secs {sum(r['secs'] for r in results)/len(results):.1f} | "
-        f"rank1_adherence {adh} ({rank1}/{tracked}) ===")
+        f"rank1_adherence {adh} ({rank1}/{tracked}) | "
+        f"rollbacks {total_rollbacks} ===")
     if logf:
         logf.close()
 
